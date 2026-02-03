@@ -1,0 +1,21 @@
+# Xcode
+*.xcuserstate
+*.xcworkspace
+xcuserdata/
+DerivedData/
+.build/
+
+# Swift Package Manager
+.swiftpm/xcode/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# IDE
+*.swp
+*~.nib

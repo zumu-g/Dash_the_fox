@@ -7,27 +7,44 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     var ground: SKSpriteNode!
     var cameraNode: SKCameraNode!
     var goalFlag: SKNode!
+    var boss: SKNode?
+    var bossHealthBar: SKShapeNode?
+    var bossHealth: Int = 5
 
     var gameState: GameState = .menu
     var currentLevel: LevelData!
+    var lastCheckpoint: CGPoint?
+    var levelStartTime: TimeInterval = 0
+    var levelTime: TimeInterval = 0
+    var damageTaken: Bool = false
 
     var isJumping = false
     var canDoubleJump = false
     var hasDoubleJumped = false
+    var canWallJump = false
     var moveDirection: CGFloat = 0
     var score = 0
+    var gemsCollected = 0
     var lives = 3
+    var comboCount = 0
+    var comboTimer: TimeInterval = 0
+    var lastComboTime: TimeInterval = 0
 
     // Power-up states
     var hasSpeedBoost = false
     var hasShield = false
     var hasMagnet = false
+    var hasInvincibility = false
+    var hasTimeFreeze = false
     var shieldNode: SKShapeNode?
 
     // UI Elements
     var scoreLabel: SKLabelNode!
+    var gemsLabel: SKLabelNode!
     var livesLabel: SKLabelNode!
     var levelLabel: SKLabelNode!
+    var timerLabel: SKLabelNode!
+    var comboLabel: SKLabelNode!
 
     // Control buttons
     var leftButton: SKShapeNode!
@@ -38,7 +55,11 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     var menuLayer: SKNode!
     var gameOverLayer: SKNode!
     var levelCompleteLayer: SKNode!
+    var shopLayer: SKNode!
     var pauseButton: SKShapeNode!
+
+    // Weather particles
+    var weatherEmitter: SKEmitterNode?
 
     // Physics categories
     let playerCategory: UInt32 = 0x1 << 0
@@ -48,6 +69,11 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     let enemyCategory: UInt32 = 0x1 << 4
     let powerUpCategory: UInt32 = 0x1 << 5
     let goalCategory: UInt32 = 0x1 << 6
+    let gemCategory: UInt32 = 0x1 << 7
+    let hazardCategory: UInt32 = 0x1 << 8
+    let trampolineCategory: UInt32 = 0x1 << 9
+    let checkpointCategory: UInt32 = 0x1 << 10
+    let bossCategory: UInt32 = 0x1 << 11
 
     // MARK: - Scene Setup
     override func didMove(to view: SKView) {
@@ -72,12 +98,28 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     func showMainMenu() {
         gameState = .menu
         clearGameElements()
+        cameraNode.removeAllChildren()
 
         menuLayer = SKNode()
         menuLayer.zPosition = 200
         cameraNode.addChild(menuLayer)
 
-        // Title
+        // Background gradient effect
+        let bgGradient = SKShapeNode(rectOf: CGSize(width: size.width + 100, height: size.height + 100))
+        bgGradient.fillColor = SKColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 0.5)
+        bgGradient.strokeColor = .clear
+        bgGradient.zPosition = -1
+        menuLayer.addChild(bgGradient)
+
+        // Title with shadow
+        let titleShadow = SKLabelNode(text: "Dash the Fox")
+        titleShadow.fontName = "AvenirNext-Bold"
+        titleShadow.fontSize = 56
+        titleShadow.fontColor = .black
+        titleShadow.alpha = 0.3
+        titleShadow.position = CGPoint(x: 3, y: 117)
+        menuLayer.addChild(titleShadow)
+
         let titleLabel = SKLabelNode(text: "Dash the Fox")
         titleLabel.fontName = "AvenirNext-Bold"
         titleLabel.fontSize = 56
@@ -100,22 +142,28 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // Play button
         let playButton = createMenuButton(text: "Play", color: .orange)
-        playButton.position = CGPoint(x: 0, y: -80)
+        playButton.position = CGPoint(x: 0, y: -70)
         playButton.name = "playButton"
         menuLayer.addChild(playButton)
 
         // Level select button
         let levelButton = createMenuButton(text: "Levels", color: .blue)
-        levelButton.position = CGPoint(x: 0, y: -160)
+        levelButton.position = CGPoint(x: -110, y: -140)
         levelButton.name = "levelButton"
         menuLayer.addChild(levelButton)
 
-        // High scores display
-        let coinsLabel = SKLabelNode(text: "Total Coins: \(PlayerData.shared.totalCoins)")
+        // Shop button
+        let shopButton = createMenuButton(text: "Shop", color: .purple)
+        shopButton.position = CGPoint(x: 110, y: -140)
+        shopButton.name = "shopButton"
+        menuLayer.addChild(shopButton)
+
+        // Stats display
+        let coinsLabel = SKLabelNode(text: "Coins: \(PlayerData.shared.totalCoins)  Gems: \(PlayerData.shared.totalGems)")
         coinsLabel.fontName = "AvenirNext-Medium"
-        coinsLabel.fontSize = 24
+        coinsLabel.fontSize = 20
         coinsLabel.fontColor = .yellow
-        coinsLabel.position = CGPoint(x: 0, y: -240)
+        coinsLabel.position = CGPoint(x: 0, y: -210)
         menuLayer.addChild(coinsLabel)
 
         // Animate menu appearance
@@ -126,18 +174,127 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     func createMenuButton(text: String, color: SKColor) -> SKNode {
         let button = SKNode()
 
-        let bg = SKShapeNode(rectOf: CGSize(width: 200, height: 60), cornerRadius: 15)
+        let bg = SKShapeNode(rectOf: CGSize(width: 180, height: 55), cornerRadius: 12)
         bg.fillColor = color
-        bg.strokeColor = color.withAlphaComponent(0.5)
-        bg.lineWidth = 4
+        bg.strokeColor = .white
+        bg.lineWidth = 3
         button.addChild(bg)
 
         let label = SKLabelNode(text: text)
         label.fontName = "AvenirNext-Bold"
-        label.fontSize = 28
+        label.fontSize = 24
         label.fontColor = .white
         label.verticalAlignmentMode = .center
         button.addChild(label)
+
+        return button
+    }
+
+    // MARK: - Shop
+    func showShop() {
+        gameState = .shop
+        menuLayer?.removeFromParent()
+
+        shopLayer = SKNode()
+        shopLayer.zPosition = 200
+        cameraNode.addChild(shopLayer)
+
+        let bg = SKShapeNode(rectOf: CGSize(width: size.width - 40, height: size.height - 100), cornerRadius: 20)
+        bg.fillColor = SKColor.black.withAlphaComponent(0.9)
+        bg.strokeColor = .yellow
+        bg.lineWidth = 3
+        shopLayer.addChild(bg)
+
+        let titleLabel = SKLabelNode(text: "Fox Skins Shop")
+        titleLabel.fontName = "AvenirNext-Bold"
+        titleLabel.fontSize = 32
+        titleLabel.fontColor = .yellow
+        titleLabel.position = CGPoint(x: 0, y: size.height / 2 - 100)
+        shopLayer.addChild(titleLabel)
+
+        let coinsLabel = SKLabelNode(text: "Your Coins: \(PlayerData.shared.totalCoins)")
+        coinsLabel.fontName = "AvenirNext-Medium"
+        coinsLabel.fontSize = 20
+        coinsLabel.fontColor = .white
+        coinsLabel.position = CGPoint(x: 0, y: size.height / 2 - 140)
+        shopLayer.addChild(coinsLabel)
+
+        // Display skins
+        let skins = FoxSkin.allCases
+        let columns = 3
+        let startX: CGFloat = -150
+        let startY: CGFloat = 50
+        let spacingX: CGFloat = 150
+        let spacingY: CGFloat = 140
+
+        for (index, skin) in skins.enumerated() {
+            let col = index % columns
+            let row = index / columns
+            let x = startX + CGFloat(col) * spacingX
+            let y = startY - CGFloat(row) * spacingY
+
+            let skinButton = createSkinButton(skin: skin)
+            skinButton.position = CGPoint(x: x, y: y)
+            skinButton.name = "skin_\(skin.rawValue)"
+            shopLayer.addChild(skinButton)
+        }
+
+        // Back button
+        let backButton = createMenuButton(text: "Back", color: .gray)
+        backButton.position = CGPoint(x: 0, y: -size.height / 2 + 80)
+        backButton.name = "backToMenuButton"
+        shopLayer.addChild(backButton)
+    }
+
+    func createSkinButton(skin: FoxSkin) -> SKNode {
+        let button = SKNode()
+
+        let isOwned = PlayerData.shared.unlockedSkins.contains(skin)
+        let isSelected = PlayerData.shared.currentSkin == skin
+
+        let bg = SKShapeNode(rectOf: CGSize(width: 120, height: 100), cornerRadius: 10)
+        bg.fillColor = isSelected ? .green.withAlphaComponent(0.3) : SKColor.gray.withAlphaComponent(0.3)
+        bg.strokeColor = isSelected ? .green : (isOwned ? .white : .gray)
+        bg.lineWidth = isSelected ? 4 : 2
+        button.addChild(bg)
+
+        // Mini fox preview
+        let foxPreview = SKShapeNode(circleOfRadius: 20)
+        foxPreview.fillColor = skin.primaryColor
+        foxPreview.strokeColor = skin.secondaryColor
+        foxPreview.lineWidth = 3
+        foxPreview.position = CGPoint(x: 0, y: 15)
+        button.addChild(foxPreview)
+
+        let nameLabel = SKLabelNode(text: skin.rawValue)
+        nameLabel.fontName = "AvenirNext-Bold"
+        nameLabel.fontSize = 14
+        nameLabel.fontColor = .white
+        nameLabel.position = CGPoint(x: 0, y: -25)
+        button.addChild(nameLabel)
+
+        if !isOwned {
+            let priceLabel = SKLabelNode(text: "\(skin.price) coins")
+            priceLabel.fontName = "AvenirNext-Medium"
+            priceLabel.fontSize = 12
+            priceLabel.fontColor = .yellow
+            priceLabel.position = CGPoint(x: 0, y: -42)
+            button.addChild(priceLabel)
+        } else if isSelected {
+            let equippedLabel = SKLabelNode(text: "Equipped")
+            equippedLabel.fontName = "AvenirNext-Medium"
+            equippedLabel.fontSize = 12
+            equippedLabel.fontColor = .green
+            equippedLabel.position = CGPoint(x: 0, y: -42)
+            button.addChild(equippedLabel)
+        } else {
+            let ownedLabel = SKLabelNode(text: "Owned")
+            ownedLabel.fontName = "AvenirNext-Medium"
+            ownedLabel.fontSize = 12
+            ownedLabel.fontColor = .cyan
+            ownedLabel.position = CGPoint(x: 0, y: -42)
+            button.addChild(ownedLabel)
+        }
 
         return button
     }
@@ -153,32 +310,44 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
         let titleLabel = SKLabelNode(text: "Select Level")
         titleLabel.fontName = "AvenirNext-Bold"
-        titleLabel.fontSize = 42
+        titleLabel.fontSize = 36
         titleLabel.fontColor = .white
-        titleLabel.position = CGPoint(x: 0, y: 150)
+        titleLabel.position = CGPoint(x: 0, y: 180)
         levelSelectLayer.addChild(titleLabel)
 
+        // 2 rows of 3 levels
         for i in 1...LevelData.totalLevels {
             let isUnlocked = i <= PlayerData.shared.currentLevel
             let levelButton = createLevelButton(level: i, unlocked: isUnlocked)
-            levelButton.position = CGPoint(x: CGFloat(i - 2) * 150, y: 0)
+            let col = (i - 1) % 3
+            let row = (i - 1) / 3
+            levelButton.position = CGPoint(x: CGFloat(col - 1) * 130, y: 50 - CGFloat(row) * 150)
             levelButton.name = "level_\(i)"
             levelSelectLayer.addChild(levelButton)
 
-            // Show high score
-            if let highScore = PlayerData.shared.highScores[i] {
-                let scoreLabel = SKLabelNode(text: "Best: \(highScore)")
-                scoreLabel.fontName = "AvenirNext-Medium"
-                scoreLabel.fontSize = 16
-                scoreLabel.fontColor = .yellow
-                scoreLabel.position = CGPoint(x: CGFloat(i - 2) * 150, y: -70)
-                levelSelectLayer.addChild(scoreLabel)
+            // Show level name
+            let levelData = LevelData.level(i)
+            let nameLabel = SKLabelNode(text: levelData.name)
+            nameLabel.fontName = "AvenirNext-Medium"
+            nameLabel.fontSize = 12
+            nameLabel.fontColor = isUnlocked ? .white : .gray
+            nameLabel.position = CGPoint(x: CGFloat(col - 1) * 130, y: -10 - CGFloat(row) * 150)
+            levelSelectLayer.addChild(nameLabel)
+
+            // Show best time if available
+            if let bestTime = PlayerData.shared.bestTimes[i] {
+                let timeLabel = SKLabelNode(text: String(format: "%.1fs", bestTime))
+                timeLabel.fontName = "AvenirNext-Medium"
+                timeLabel.fontSize = 11
+                timeLabel.fontColor = .cyan
+                timeLabel.position = CGPoint(x: CGFloat(col - 1) * 130, y: -28 - CGFloat(row) * 150)
+                levelSelectLayer.addChild(timeLabel)
             }
         }
 
         // Back button
         let backButton = createMenuButton(text: "Back", color: .gray)
-        backButton.position = CGPoint(x: 0, y: -150)
+        backButton.position = CGPoint(x: 0, y: -180)
         backButton.name = "backButton"
         levelSelectLayer.addChild(backButton)
     }
@@ -186,18 +355,29 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     func createLevelButton(level: Int, unlocked: Bool) -> SKNode {
         let button = SKNode()
 
-        let bg = SKShapeNode(circleOfRadius: 50)
+        let bg = SKShapeNode(circleOfRadius: 45)
         bg.fillColor = unlocked ? .orange : .darkGray
         bg.strokeColor = unlocked ? .white : .gray
-        bg.lineWidth = 4
+        bg.lineWidth = 3
         button.addChild(bg)
 
         let label = SKLabelNode(text: unlocked ? "\(level)" : "🔒")
         label.fontName = "AvenirNext-Bold"
-        label.fontSize = unlocked ? 36 : 28
+        label.fontSize = unlocked ? 32 : 24
         label.fontColor = .white
         label.verticalAlignmentMode = .center
         button.addChild(label)
+
+        // Star rating based on score
+        if let highScore = PlayerData.shared.highScores[level] {
+            let stars = min(3, highScore / 5)
+            let starLabel = SKLabelNode(text: String(repeating: "★", count: stars) + String(repeating: "☆", count: 3 - stars))
+            starLabel.fontName = "AvenirNext-Bold"
+            starLabel.fontSize = 14
+            starLabel.fontColor = .yellow
+            starLabel.position = CGPoint(x: 0, y: -60)
+            button.addChild(starLabel)
+        }
 
         return button
     }
@@ -207,43 +387,189 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         gameState = .playing
         currentLevel = LevelData.level(level)
         score = 0
+        gemsCollected = 0
+        comboCount = 0
         hasDoubleJumped = false
         canDoubleJump = false
         hasSpeedBoost = false
         hasShield = false
         hasMagnet = false
+        hasInvincibility = false
+        hasTimeFreeze = false
+        lastCheckpoint = nil
+        damageTaken = false
+        bossHealth = 5
 
         clearGameElements()
         menuLayer?.removeFromParent()
+        shopLayer?.removeFromParent()
         cameraNode.childNode(withName: "levelSelectLayer")?.removeFromParent()
         gameOverLayer?.removeFromParent()
         levelCompleteLayer?.removeFromParent()
+        cameraNode.removeAllChildren()
 
         backgroundColor = currentLevel.backgroundColors.sky
+        levelStartTime = CACurrentMediaTime()
 
         setupDash()
         setupGround()
         setupPlatforms()
         setupCoins()
+        setupGems()
         setupEnemies()
         setupPowerUps()
+        setupHazards()
+        setupTrampolines()
+        setupCheckpoints()
         setupGoal()
         setupControls()
         setupHUD()
         setupBackground()
         setupPauseButton()
+        setupWeather()
+
+        if currentLevel.hasBoss, let bossPos = currentLevel.bossPosition {
+            setupBoss(at: bossPos)
+        }
     }
 
     func clearGameElements() {
-        // Remove all game objects
         children.filter { $0 != cameraNode }.forEach { $0.removeFromParent() }
         shieldNode?.removeFromParent()
         shieldNode = nil
+        weatherEmitter?.removeFromParent()
+        weatherEmitter = nil
+        boss = nil
+        bossHealthBar = nil
+    }
+
+    // MARK: - Weather Effects
+    func setupWeather() {
+        switch currentLevel.weather {
+        case .rain:
+            createRainEffect()
+        case .snow:
+            createSnowEffect()
+        case .leaves:
+            createLeavesEffect()
+        case .fireflies:
+            createFirefliesEffect()
+        case .none:
+            break
+        }
+    }
+
+    func createRainEffect() {
+        let emitter = SKEmitterNode()
+        emitter.particleLifetime = 2
+        emitter.particleBirthRate = 200
+        emitter.particleSpeed = 500
+        emitter.particleSpeedRange = 100
+        emitter.emissionAngle = -.pi / 2 - 0.2
+        emitter.emissionAngleRange = 0.1
+        emitter.particleAlpha = 0.6
+        emitter.particleAlphaSpeed = -0.3
+        emitter.particleScale = 0.05
+        emitter.particleScaleRange = 0.02
+        emitter.particleColor = .cyan
+
+        let texture = createRainTexture()
+        emitter.particleTexture = texture
+
+        emitter.position = CGPoint(x: size.width / 2, y: size.height)
+        emitter.particlePositionRange = CGVector(dx: currentLevel.levelLength, dy: 0)
+        emitter.zPosition = 50
+        emitter.targetNode = self
+
+        addChild(emitter)
+        weatherEmitter = emitter
+    }
+
+    func createSnowEffect() {
+        let emitter = SKEmitterNode()
+        emitter.particleLifetime = 8
+        emitter.particleBirthRate = 50
+        emitter.particleSpeed = 50
+        emitter.particleSpeedRange = 30
+        emitter.emissionAngle = -.pi / 2
+        emitter.emissionAngleRange = 0.5
+        emitter.particleAlpha = 0.9
+        emitter.particleAlphaSpeed = -0.1
+        emitter.particleScale = 0.1
+        emitter.particleScaleRange = 0.05
+        emitter.particleColor = .white
+
+        emitter.position = CGPoint(x: size.width / 2, y: size.height)
+        emitter.particlePositionRange = CGVector(dx: currentLevel.levelLength, dy: 0)
+        emitter.zPosition = 50
+        emitter.targetNode = self
+
+        addChild(emitter)
+        weatherEmitter = emitter
+    }
+
+    func createLeavesEffect() {
+        let emitter = SKEmitterNode()
+        emitter.particleLifetime = 6
+        emitter.particleBirthRate = 10
+        emitter.particleSpeed = 80
+        emitter.particleSpeedRange = 40
+        emitter.emissionAngle = -.pi / 2 - 0.3
+        emitter.emissionAngleRange = 0.5
+        emitter.particleAlpha = 0.8
+        emitter.particleRotation = 0
+        emitter.particleRotationSpeed = 2
+        emitter.particleScale = 0.15
+        emitter.particleScaleRange = 0.05
+        emitter.particleColor = SKColor(red: 0.8, green: 0.4, blue: 0.1, alpha: 1.0)
+        emitter.particleColorBlendFactor = 1.0
+
+        emitter.position = CGPoint(x: size.width / 2, y: size.height)
+        emitter.particlePositionRange = CGVector(dx: currentLevel.levelLength, dy: 0)
+        emitter.zPosition = 50
+        emitter.targetNode = self
+
+        addChild(emitter)
+        weatherEmitter = emitter
+    }
+
+    func createFirefliesEffect() {
+        let emitter = SKEmitterNode()
+        emitter.particleLifetime = 4
+        emitter.particleBirthRate = 15
+        emitter.particleSpeed = 20
+        emitter.particleSpeedRange = 15
+        emitter.emissionAngle = 0
+        emitter.emissionAngleRange = .pi * 2
+        emitter.particleAlpha = 0
+        emitter.particleAlphaSequence = SKKeyframeSequence(keyframeValues: [0, 1, 1, 0], times: [0, 0.2, 0.8, 1])
+        emitter.particleScale = 0.1
+        emitter.particleScaleRange = 0.05
+        emitter.particleColor = .yellow
+        emitter.particleColorBlendFactor = 1.0
+
+        emitter.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        emitter.particlePositionRange = CGVector(dx: currentLevel.levelLength, dy: size.height - 200)
+        emitter.zPosition = 50
+        emitter.targetNode = self
+
+        addChild(emitter)
+        weatherEmitter = emitter
+    }
+
+    func createRainTexture() -> SKTexture {
+        let size = CGSize(width: 3, height: 20)
+        UIGraphicsBeginImageContextWithOptions(size, false, 0)
+        let context = UIGraphicsGetCurrentContext()!
+        context.setFillColor(UIColor.white.cgColor)
+        context.fill(CGRect(origin: .zero, size: size))
+        let image = UIGraphicsGetImageFromCurrentImageContext()!
+        UIGraphicsEndImageContext()
+        return SKTexture(image: image)
     }
 
     // MARK: - Background
     func setupBackground() {
-        // Add clouds
         for i in 0..<Int(currentLevel.levelLength / 400) {
             let cloud = createCloud()
             cloud.position = CGPoint(
@@ -254,7 +580,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             addChild(cloud)
         }
 
-        // Add hills in background
         for i in 0..<Int(currentLevel.levelLength / 300) {
             let hill = createHill()
             hill.position = CGPoint(
@@ -296,29 +621,28 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let hill = SKShapeNode(path: path)
         let levelNum = currentLevel.levelNumber
         switch levelNum {
-        case 1:
-            hill.fillColor = SKColor(red: 0.3, green: 0.6, blue: 0.3, alpha: 1.0)
-        case 2:
-            hill.fillColor = SKColor(red: 0.4, green: 0.3, blue: 0.5, alpha: 1.0)
-        case 3:
-            hill.fillColor = SKColor(red: 0.2, green: 0.25, blue: 0.4, alpha: 1.0)
-        default:
-            hill.fillColor = SKColor(red: 0.3, green: 0.6, blue: 0.3, alpha: 1.0)
+        case 1: hill.fillColor = SKColor(red: 0.3, green: 0.6, blue: 0.3, alpha: 1.0)
+        case 2: hill.fillColor = SKColor(red: 0.4, green: 0.3, blue: 0.5, alpha: 1.0)
+        case 3: hill.fillColor = SKColor(red: 0.2, green: 0.25, blue: 0.4, alpha: 1.0)
+        case 4: hill.fillColor = SKColor(red: 0.5, green: 0.2, blue: 0.1, alpha: 1.0)
+        case 5: hill.fillColor = SKColor(red: 0.7, green: 0.8, blue: 0.9, alpha: 1.0)
+        case 6: hill.fillColor = SKColor(red: 0.15, green: 0.1, blue: 0.2, alpha: 1.0)
+        default: hill.fillColor = SKColor(red: 0.3, green: 0.6, blue: 0.3, alpha: 1.0)
         }
         hill.strokeColor = .clear
-
         return hill
     }
 
     // MARK: - Dash Setup
     func setupDash() {
         dash = createFoxCharacter()
-        dash.position = CGPoint(x: 150, y: 300)
+        let startPos = lastCheckpoint ?? CGPoint(x: 150, y: 300)
+        dash.position = startPos
         dash.name = "dash"
 
         let body = SKPhysicsBody(rectangleOf: CGSize(width: 40, height: 50))
         body.categoryBitMask = playerCategory
-        body.contactTestBitMask = groundCategory | platformCategory | coinCategory | enemyCategory | powerUpCategory | goalCategory
+        body.contactTestBitMask = groundCategory | platformCategory | coinCategory | enemyCategory | powerUpCategory | goalCategory | gemCategory | hazardCategory | trampolineCategory | checkpointCategory | bossCategory
         body.collisionBitMask = groundCategory | platformCategory
         body.allowsRotation = false
         body.friction = 0.2
@@ -329,19 +653,20 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     func createFoxCharacter() -> SKNode {
+        let skin = PlayerData.shared.currentSkin
         let fox = SKNode()
 
         // Body
         let body = SKShapeNode(ellipseOf: CGSize(width: 50, height: 40))
-        body.fillColor = SKColor(red: 1.0, green: 0.5, blue: 0.2, alpha: 1.0)
-        body.strokeColor = SKColor(red: 0.8, green: 0.3, blue: 0.1, alpha: 1.0)
+        body.fillColor = skin.primaryColor
+        body.strokeColor = skin.secondaryColor
         body.lineWidth = 2
         fox.addChild(body)
 
         // Head
         let head = SKShapeNode(circleOfRadius: 22)
-        head.fillColor = SKColor(red: 1.0, green: 0.5, blue: 0.2, alpha: 1.0)
-        head.strokeColor = SKColor(red: 0.8, green: 0.3, blue: 0.1, alpha: 1.0)
+        head.fillColor = skin.primaryColor
+        head.strokeColor = skin.secondaryColor
         head.lineWidth = 2
         head.position = CGPoint(x: 20, y: 15)
         fox.addChild(head)
@@ -354,14 +679,14 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         earPath.closeSubpath()
 
         let leftEar = SKShapeNode(path: earPath)
-        leftEar.fillColor = SKColor(red: 1.0, green: 0.5, blue: 0.2, alpha: 1.0)
-        leftEar.strokeColor = SKColor(red: 0.8, green: 0.3, blue: 0.1, alpha: 1.0)
+        leftEar.fillColor = skin.primaryColor
+        leftEar.strokeColor = skin.secondaryColor
         leftEar.position = CGPoint(x: 5, y: 30)
         fox.addChild(leftEar)
 
         let rightEar = SKShapeNode(path: earPath)
-        rightEar.fillColor = SKColor(red: 1.0, green: 0.5, blue: 0.2, alpha: 1.0)
-        rightEar.strokeColor = SKColor(red: 0.8, green: 0.3, blue: 0.1, alpha: 1.0)
+        rightEar.fillColor = skin.primaryColor
+        rightEar.strokeColor = skin.secondaryColor
         rightEar.position = CGPoint(x: 22, y: 30)
         fox.addChild(rightEar)
 
@@ -372,14 +697,15 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         innerEarPath.addLine(to: CGPoint(x: 12, y: 2))
         innerEarPath.closeSubpath()
 
+        let pinkColor = SKColor(red: 1.0, green: 0.8, blue: 0.7, alpha: 1.0)
         let leftInnerEar = SKShapeNode(path: innerEarPath)
-        leftInnerEar.fillColor = SKColor(red: 1.0, green: 0.8, blue: 0.7, alpha: 1.0)
+        leftInnerEar.fillColor = pinkColor
         leftInnerEar.strokeColor = .clear
         leftInnerEar.position = CGPoint(x: 5, y: 30)
         fox.addChild(leftInnerEar)
 
         let rightInnerEar = SKShapeNode(path: innerEarPath)
-        rightInnerEar.fillColor = SKColor(red: 1.0, green: 0.8, blue: 0.7, alpha: 1.0)
+        rightInnerEar.fillColor = pinkColor
         rightInnerEar.strokeColor = .clear
         rightInnerEar.position = CGPoint(x: 22, y: 30)
         fox.addChild(rightInnerEar)
@@ -430,14 +756,14 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         tailPath.addQuadCurve(to: CGPoint(x: 0, y: 0), control: CGPoint(x: -20, y: 20))
 
         let tail = SKShapeNode(path: tailPath)
-        tail.fillColor = SKColor(red: 1.0, green: 0.5, blue: 0.2, alpha: 1.0)
-        tail.strokeColor = SKColor(red: 0.8, green: 0.3, blue: 0.1, alpha: 1.0)
+        tail.fillColor = skin.primaryColor
+        tail.strokeColor = skin.secondaryColor
         tail.lineWidth = 2
         tail.position = CGPoint(x: -25, y: 0)
         tail.name = "tail"
         fox.addChild(tail)
 
-        // Tail tip (white)
+        // Tail tip
         let tailTipPath = CGMutablePath()
         tailTipPath.move(to: CGPoint(x: -35, y: 25))
         tailTipPath.addQuadCurve(to: CGPoint(x: -20, y: 15), control: CGPoint(x: -25, y: 25))
@@ -450,7 +776,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         fox.addChild(tailTip)
 
         // Legs
-        let legColor = SKColor(red: 0.8, green: 0.4, blue: 0.1, alpha: 1.0)
+        let legColor = skin.secondaryColor
 
         let frontLeg = SKShapeNode(rectOf: CGSize(width: 10, height: 20))
         frontLeg.fillColor = legColor
@@ -469,7 +795,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         return fox
     }
 
-    // MARK: - Ground Setup
+    // MARK: - Ground & Platforms
     func setupGround() {
         let groundWidth = currentLevel.levelLength + 400
         ground = SKSpriteNode(color: currentLevel.backgroundColors.ground, size: CGSize(width: groundWidth, height: 100))
@@ -483,38 +809,92 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
         addChild(ground)
 
-        // Grass on top
         let grass = SKSpriteNode(color: SKColor(red: 0.2, green: 0.7, blue: 0.2, alpha: 1.0), size: CGSize(width: groundWidth, height: 20))
         grass.position = CGPoint(x: 0, y: 60)
         ground.addChild(grass)
     }
 
-    // MARK: - Platforms
     func setupPlatforms() {
-        for (index, pos) in currentLevel.platforms.enumerated() {
-            let platform = createPlatform(width: pos.width)
-            platform.position = CGPoint(x: pos.x, y: pos.y)
+        for (index, platformData) in currentLevel.platforms.enumerated() {
+            let platform = createPlatform(width: platformData.width, type: platformData.type)
+            platform.position = CGPoint(x: platformData.x, y: platformData.y)
             platform.name = "platform_\(index)"
+            platform.userData = ["type": platformData.type]
             addChild(platform)
+
+            // Setup moving platforms
+            if platformData.type == .moving && index < currentLevel.movingPlatformPaths.count {
+                let path = currentLevel.movingPlatformPaths[index]
+                if path.count >= 2 {
+                    var actions: [SKAction] = []
+                    for (point, duration) in path {
+                        actions.append(SKAction.move(to: point, duration: duration))
+                    }
+                    platform.run(SKAction.repeatForever(SKAction.sequence(actions)))
+                }
+            }
         }
     }
 
-    func createPlatform(width: CGFloat) -> SKNode {
-        let platform = SKSpriteNode(color: SKColor(red: 0.5, green: 0.35, blue: 0.2, alpha: 1.0), size: CGSize(width: width, height: 30))
+    func createPlatform(width: CGFloat, type: PlatformType) -> SKNode {
+        var color: SKColor
+        switch type {
+        case .normal: color = SKColor(red: 0.5, green: 0.35, blue: 0.2, alpha: 1.0)
+        case .bouncy: color = SKColor(red: 0.9, green: 0.4, blue: 0.6, alpha: 1.0)
+        case .icy: color = SKColor(red: 0.7, green: 0.9, blue: 1.0, alpha: 1.0)
+        case .falling: color = SKColor(red: 0.6, green: 0.4, blue: 0.3, alpha: 1.0)
+        case .crumbling: color = SKColor(red: 0.5, green: 0.3, blue: 0.2, alpha: 1.0)
+        case .moving: color = SKColor(red: 0.4, green: 0.5, blue: 0.6, alpha: 1.0)
+        }
+
+        let platform = SKSpriteNode(color: color, size: CGSize(width: width, height: 30))
 
         platform.physicsBody = SKPhysicsBody(rectangleOf: platform.size)
         platform.physicsBody?.isDynamic = false
         platform.physicsBody?.categoryBitMask = platformCategory
-        platform.physicsBody?.friction = 0.8
+        platform.physicsBody?.friction = type == .icy ? 0.01 : 0.8
 
-        let grass = SKSpriteNode(color: SKColor(red: 0.2, green: 0.7, blue: 0.2, alpha: 1.0), size: CGSize(width: width, height: 8))
+        // Grass top (different for special platforms)
+        var grassColor: SKColor
+        switch type {
+        case .bouncy: grassColor = SKColor(red: 1.0, green: 0.5, blue: 0.7, alpha: 1.0)
+        case .icy: grassColor = SKColor(red: 0.8, green: 0.95, blue: 1.0, alpha: 1.0)
+        default: grassColor = SKColor(red: 0.2, green: 0.7, blue: 0.2, alpha: 1.0)
+        }
+
+        let grass = SKSpriteNode(color: grassColor, size: CGSize(width: width, height: 8))
         grass.position = CGPoint(x: 0, y: 19)
         platform.addChild(grass)
+
+        // Add indicators for special platforms
+        if type == .bouncy {
+            let spring = SKShapeNode(rectOf: CGSize(width: 20, height: 10))
+            spring.fillColor = .yellow
+            spring.strokeColor = .orange
+            spring.lineWidth = 2
+            spring.position = CGPoint(x: 0, y: 5)
+            platform.addChild(spring)
+        }
+
+        if type == .crumbling {
+            // Add crack lines
+            for i in 0..<3 {
+                let crack = SKShapeNode()
+                let crackPath = CGMutablePath()
+                crackPath.move(to: CGPoint(x: CGFloat(i - 1) * width / 4, y: -10))
+                crackPath.addLine(to: CGPoint(x: CGFloat(i - 1) * width / 4 + 10, y: 10))
+                crack.path = crackPath
+                crack.strokeColor = .black
+                crack.lineWidth = 1
+                crack.alpha = 0.5
+                platform.addChild(crack)
+            }
+        }
 
         return platform
     }
 
-    // MARK: - Coins
+    // MARK: - Collectibles
     func setupCoins() {
         for (index, pos) in currentLevel.coins.enumerated() {
             let coin = createCoin()
@@ -552,6 +932,60 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         return coin
     }
 
+    func setupGems() {
+        for (index, pos) in currentLevel.gems.enumerated() {
+            let gem = createGem()
+            gem.position = pos
+            gem.name = "gem_\(index)"
+            addChild(gem)
+        }
+    }
+
+    func createGem() -> SKNode {
+        let gem = SKNode()
+
+        // Diamond shape
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 0, y: 20))
+        path.addLine(to: CGPoint(x: 15, y: 0))
+        path.addLine(to: CGPoint(x: 0, y: -20))
+        path.addLine(to: CGPoint(x: -15, y: 0))
+        path.closeSubpath()
+
+        let shape = SKShapeNode(path: path)
+        shape.fillColor = SKColor(red: 0.3, green: 0.8, blue: 1.0, alpha: 1.0)
+        shape.strokeColor = .white
+        shape.lineWidth = 2
+        gem.addChild(shape)
+
+        // Sparkle
+        let sparkle = SKShapeNode(circleOfRadius: 5)
+        sparkle.fillColor = .white
+        sparkle.strokeColor = .clear
+        sparkle.position = CGPoint(x: -5, y: 8)
+        sparkle.alpha = 0.8
+        gem.addChild(sparkle)
+
+        gem.physicsBody = SKPhysicsBody(circleOfRadius: 18)
+        gem.physicsBody?.isDynamic = false
+        gem.physicsBody?.categoryBitMask = gemCategory
+        gem.physicsBody?.contactTestBitMask = playerCategory
+
+        // Sparkle animation
+        let fadeOut = SKAction.fadeAlpha(to: 0.3, duration: 0.5)
+        let fadeIn = SKAction.fadeAlpha(to: 1.0, duration: 0.5)
+        sparkle.run(SKAction.repeatForever(SKAction.sequence([fadeOut, fadeIn])))
+
+        // Float animation
+        let moveUp = SKAction.moveBy(x: 0, y: 10, duration: 0.8)
+        let moveDown = SKAction.moveBy(x: 0, y: -10, duration: 0.8)
+        moveUp.timingMode = .easeInEaseOut
+        moveDown.timingMode = .easeInEaseOut
+        gem.run(SKAction.repeatForever(SKAction.sequence([moveUp, moveDown])))
+
+        return gem
+    }
+
     // MARK: - Enemies
     func setupEnemies() {
         for (index, enemyData) in currentLevel.enemies.enumerated() {
@@ -560,43 +994,44 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             enemy.name = "enemy_\(index)"
             addChild(enemy)
 
-            // Movement based on type
             switch enemyData.type {
             case .spiky, .slime, .snake:
                 let moveRight = SKAction.moveBy(x: 100, duration: 2)
                 let moveLeft = SKAction.moveBy(x: -100, duration: 2)
                 enemy.run(SKAction.repeatForever(SKAction.sequence([moveRight, moveLeft])))
-            case .bat:
+            case .bat, .ghost:
                 let moveRight = SKAction.moveBy(x: 80, duration: 1.5)
                 let moveUp = SKAction.moveBy(x: 0, y: 40, duration: 0.75)
                 let moveDown = SKAction.moveBy(x: 0, y: -40, duration: 0.75)
                 let moveLeft = SKAction.moveBy(x: -80, duration: 1.5)
-                let moveUp2 = SKAction.moveBy(x: 0, y: 40, duration: 0.75)
-                let moveDown2 = SKAction.moveBy(x: 0, y: -40, duration: 0.75)
                 enemy.run(SKAction.repeatForever(SKAction.sequence([
                     SKAction.group([moveRight, SKAction.sequence([moveUp, moveDown])]),
-                    SKAction.group([moveLeft, SKAction.sequence([moveUp2, moveDown2])])
+                    SKAction.group([moveLeft, SKAction.sequence([moveUp, moveDown])])
                 ])))
+            case .fireball:
+                let moveRight = SKAction.moveBy(x: 150, duration: 1.0)
+                let moveLeft = SKAction.moveBy(x: -150, duration: 1.0)
+                enemy.run(SKAction.repeatForever(SKAction.sequence([moveRight, moveLeft])))
+            case .boss:
+                break
             }
         }
     }
 
     func createEnemy(type: EnemyType) -> SKNode {
         switch type {
-        case .spiky:
-            return createSpikyEnemy()
-        case .slime:
-            return createSlimeEnemy()
-        case .bat:
-            return createBatEnemy()
-        case .snake:
-            return createSnakeEnemy()
+        case .spiky: return createSpikyEnemy()
+        case .slime: return createSlimeEnemy()
+        case .bat: return createBatEnemy()
+        case .snake: return createSnakeEnemy()
+        case .ghost: return createGhostEnemy()
+        case .fireball: return createFireballEnemy()
+        case .boss: return createBossEnemy()
         }
     }
 
     func createSpikyEnemy() -> SKNode {
         let enemy = SKNode()
-
         let body = SKShapeNode(circleOfRadius: 25)
         body.fillColor = SKColor(red: 0.3, green: 0.1, blue: 0.4, alpha: 1.0)
         body.strokeColor = SKColor(red: 0.5, green: 0.2, blue: 0.6, alpha: 1.0)
@@ -620,7 +1055,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         enemy.physicsBody?.categoryBitMask = enemyCategory
         enemy.physicsBody?.contactTestBitMask = playerCategory
 
-        // Rotate spikes
         let rotate = SKAction.rotate(byAngle: .pi * 2, duration: 3)
         enemy.run(SKAction.repeatForever(rotate))
 
@@ -629,8 +1063,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
     func createSlimeEnemy() -> SKNode {
         let enemy = SKNode()
-
-        // Slime body (blob shape)
         let path = CGMutablePath()
         path.move(to: CGPoint(x: -25, y: 0))
         path.addQuadCurve(to: CGPoint(x: 0, y: 30), control: CGPoint(x: -20, y: 35))
@@ -651,12 +1083,9 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         enemy.physicsBody?.categoryBitMask = enemyCategory
         enemy.physicsBody?.contactTestBitMask = playerCategory
 
-        // Bounce animation
         let squish = SKAction.scaleY(to: 0.7, duration: 0.3)
         let stretch = SKAction.scaleY(to: 1.2, duration: 0.3)
         let normal = SKAction.scaleY(to: 1.0, duration: 0.2)
-        squish.timingMode = .easeOut
-        stretch.timingMode = .easeOut
         enemy.run(SKAction.repeatForever(SKAction.sequence([squish, stretch, normal])))
 
         return enemy
@@ -664,14 +1093,11 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
     func createBatEnemy() -> SKNode {
         let enemy = SKNode()
-
-        // Body
         let body = SKShapeNode(ellipseOf: CGSize(width: 30, height: 25))
         body.fillColor = SKColor(red: 0.2, green: 0.2, blue: 0.3, alpha: 1.0)
         body.strokeColor = .clear
         enemy.addChild(body)
 
-        // Wings
         let wingPath = CGMutablePath()
         wingPath.move(to: CGPoint(x: 0, y: 0))
         wingPath.addQuadCurve(to: CGPoint(x: 35, y: -10), control: CGPoint(x: 20, y: 15))
@@ -681,7 +1107,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         leftWing.fillColor = SKColor(red: 0.3, green: 0.2, blue: 0.4, alpha: 1.0)
         leftWing.strokeColor = .clear
         leftWing.position = CGPoint(x: -15, y: 5)
-        leftWing.name = "leftWing"
         enemy.addChild(leftWing)
 
         let rightWing = SKShapeNode(path: wingPath)
@@ -689,26 +1114,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         rightWing.strokeColor = .clear
         rightWing.xScale = -1
         rightWing.position = CGPoint(x: 15, y: 5)
-        rightWing.name = "rightWing"
         enemy.addChild(rightWing)
-
-        // Ears
-        let earPath = CGMutablePath()
-        earPath.move(to: CGPoint(x: 0, y: 0))
-        earPath.addLine(to: CGPoint(x: 5, y: 15))
-        earPath.addLine(to: CGPoint(x: 10, y: 0))
-
-        let leftEar = SKShapeNode(path: earPath)
-        leftEar.fillColor = SKColor(red: 0.2, green: 0.2, blue: 0.3, alpha: 1.0)
-        leftEar.strokeColor = .clear
-        leftEar.position = CGPoint(x: -10, y: 8)
-        enemy.addChild(leftEar)
-
-        let rightEar = SKShapeNode(path: earPath)
-        rightEar.fillColor = SKColor(red: 0.2, green: 0.2, blue: 0.3, alpha: 1.0)
-        rightEar.strokeColor = .clear
-        rightEar.position = CGPoint(x: 0, y: 8)
-        enemy.addChild(rightEar)
 
         addEnemyEyes(to: enemy, color: .yellow, size: 4)
 
@@ -717,11 +1123,9 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         enemy.physicsBody?.categoryBitMask = enemyCategory
         enemy.physicsBody?.contactTestBitMask = playerCategory
 
-        // Wing flap animation
         let flapUp = SKAction.rotate(toAngle: 0.5, duration: 0.15)
         let flapDown = SKAction.rotate(toAngle: -0.3, duration: 0.15)
         let wingFlap = SKAction.repeatForever(SKAction.sequence([flapUp, flapDown]))
-
         leftWing.run(wingFlap)
         rightWing.run(wingFlap.reversed())
 
@@ -730,8 +1134,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
     func createSnakeEnemy() -> SKNode {
         let enemy = SKNode()
-
-        // Snake body segments
         let segmentColor = SKColor(red: 0.6, green: 0.4, blue: 0.1, alpha: 1.0)
 
         for i in 0..<5 {
@@ -743,7 +1145,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             enemy.addChild(segment)
         }
 
-        // Head
         let head = SKShapeNode(ellipseOf: CGSize(width: 28, height: 20))
         head.fillColor = segmentColor
         head.strokeColor = SKColor(red: 0.5, green: 0.3, blue: 0.0, alpha: 1.0)
@@ -751,42 +1152,149 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         head.position = CGPoint(x: 20, y: 0)
         enemy.addChild(head)
 
-        // Eyes
-        let leftEye = SKShapeNode(circleOfRadius: 4)
-        leftEye.fillColor = .yellow
-        leftEye.strokeColor = .clear
-        leftEye.position = CGPoint(x: 25, y: 5)
-        enemy.addChild(leftEye)
+        let eye = SKShapeNode(circleOfRadius: 4)
+        eye.fillColor = .yellow
+        eye.strokeColor = .clear
+        eye.position = CGPoint(x: 25, y: 5)
+        enemy.addChild(eye)
 
-        let leftPupil = SKShapeNode(circleOfRadius: 2)
-        leftPupil.fillColor = .black
-        leftPupil.strokeColor = .clear
-        leftPupil.position = CGPoint(x: 26, y: 5)
-        enemy.addChild(leftPupil)
-
-        // Tongue
         let tongue = SKShapeNode(rectOf: CGSize(width: 15, height: 3))
         tongue.fillColor = .red
         tongue.strokeColor = .clear
         tongue.position = CGPoint(x: 38, y: 0)
-        tongue.name = "tongue"
         enemy.addChild(tongue)
 
-        // Tongue animation
         let tongueOut = SKAction.moveBy(x: 8, y: 0, duration: 0.2)
         let tongueIn = SKAction.moveBy(x: -8, y: 0, duration: 0.2)
-        let wait = SKAction.wait(forDuration: 1.0)
-        tongue.run(SKAction.repeatForever(SKAction.sequence([tongueOut, tongueIn, wait])))
+        tongue.run(SKAction.repeatForever(SKAction.sequence([tongueOut, tongueIn, SKAction.wait(forDuration: 1.0)])))
 
         enemy.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 60, height: 24))
         enemy.physicsBody?.isDynamic = false
         enemy.physicsBody?.categoryBitMask = enemyCategory
         enemy.physicsBody?.contactTestBitMask = playerCategory
 
-        // Slither animation
-        let slitherUp = SKAction.moveBy(x: 0, y: 3, duration: 0.2)
-        let slitherDown = SKAction.moveBy(x: 0, y: -3, duration: 0.2)
-        enemy.run(SKAction.repeatForever(SKAction.sequence([slitherUp, slitherDown])))
+        return enemy
+    }
+
+    func createGhostEnemy() -> SKNode {
+        let enemy = SKNode()
+
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: -20, y: -20))
+        path.addQuadCurve(to: CGPoint(x: 0, y: 25), control: CGPoint(x: -25, y: 10))
+        path.addQuadCurve(to: CGPoint(x: 20, y: -20), control: CGPoint(x: 25, y: 10))
+        path.addQuadCurve(to: CGPoint(x: 10, y: -15), control: CGPoint(x: 15, y: -25))
+        path.addQuadCurve(to: CGPoint(x: 0, y: -20), control: CGPoint(x: 5, y: -10))
+        path.addQuadCurve(to: CGPoint(x: -10, y: -15), control: CGPoint(x: -5, y: -10))
+        path.addQuadCurve(to: CGPoint(x: -20, y: -20), control: CGPoint(x: -15, y: -25))
+
+        let body = SKShapeNode(path: path)
+        body.fillColor = SKColor.white.withAlphaComponent(0.7)
+        body.strokeColor = SKColor.white.withAlphaComponent(0.9)
+        body.lineWidth = 2
+        enemy.addChild(body)
+
+        let leftEye = SKShapeNode(ellipseOf: CGSize(width: 10, height: 14))
+        leftEye.fillColor = .black
+        leftEye.strokeColor = .clear
+        leftEye.position = CGPoint(x: -8, y: 5)
+        enemy.addChild(leftEye)
+
+        let rightEye = SKShapeNode(ellipseOf: CGSize(width: 10, height: 14))
+        rightEye.fillColor = .black
+        rightEye.strokeColor = .clear
+        rightEye.position = CGPoint(x: 8, y: 5)
+        enemy.addChild(rightEye)
+
+        enemy.physicsBody = SKPhysicsBody(circleOfRadius: 22)
+        enemy.physicsBody?.isDynamic = false
+        enemy.physicsBody?.categoryBitMask = enemyCategory
+        enemy.physicsBody?.contactTestBitMask = playerCategory
+
+        let fadeOut = SKAction.fadeAlpha(to: 0.3, duration: 1.0)
+        let fadeIn = SKAction.fadeAlpha(to: 0.8, duration: 1.0)
+        enemy.run(SKAction.repeatForever(SKAction.sequence([fadeOut, fadeIn])))
+
+        return enemy
+    }
+
+    func createFireballEnemy() -> SKNode {
+        let enemy = SKNode()
+
+        let core = SKShapeNode(circleOfRadius: 15)
+        core.fillColor = .yellow
+        core.strokeColor = .orange
+        core.lineWidth = 3
+        enemy.addChild(core)
+
+        let outerFlame = SKShapeNode(circleOfRadius: 22)
+        outerFlame.fillColor = SKColor.orange.withAlphaComponent(0.5)
+        outerFlame.strokeColor = .clear
+        enemy.addChild(outerFlame)
+
+        let pulse = SKAction.scale(to: 1.3, duration: 0.2)
+        let shrink = SKAction.scale(to: 0.9, duration: 0.2)
+        outerFlame.run(SKAction.repeatForever(SKAction.sequence([pulse, shrink])))
+
+        enemy.physicsBody = SKPhysicsBody(circleOfRadius: 18)
+        enemy.physicsBody?.isDynamic = false
+        enemy.physicsBody?.categoryBitMask = enemyCategory
+        enemy.physicsBody?.contactTestBitMask = playerCategory
+
+        let rotate = SKAction.rotate(byAngle: .pi * 2, duration: 0.5)
+        enemy.run(SKAction.repeatForever(rotate))
+
+        return enemy
+    }
+
+    func createBossEnemy() -> SKNode {
+        let enemy = SKNode()
+
+        let body = SKShapeNode(circleOfRadius: 60)
+        body.fillColor = SKColor(red: 0.3, green: 0.0, blue: 0.0, alpha: 1.0)
+        body.strokeColor = SKColor(red: 0.6, green: 0.0, blue: 0.0, alpha: 1.0)
+        body.lineWidth = 5
+        enemy.addChild(body)
+
+        // Horns
+        let hornPath = CGMutablePath()
+        hornPath.move(to: CGPoint(x: 0, y: 0))
+        hornPath.addLine(to: CGPoint(x: 10, y: 40))
+        hornPath.addLine(to: CGPoint(x: 20, y: 0))
+
+        let leftHorn = SKShapeNode(path: hornPath)
+        leftHorn.fillColor = .darkGray
+        leftHorn.strokeColor = .black
+        leftHorn.position = CGPoint(x: -40, y: 40)
+        leftHorn.zRotation = -0.3
+        enemy.addChild(leftHorn)
+
+        let rightHorn = SKShapeNode(path: hornPath)
+        rightHorn.fillColor = .darkGray
+        rightHorn.strokeColor = .black
+        rightHorn.position = CGPoint(x: 20, y: 40)
+        rightHorn.zRotation = 0.3
+        enemy.addChild(rightHorn)
+
+        // Eyes
+        let leftEye = SKShapeNode(circleOfRadius: 12)
+        leftEye.fillColor = .yellow
+        leftEye.strokeColor = .red
+        leftEye.lineWidth = 2
+        leftEye.position = CGPoint(x: -25, y: 15)
+        enemy.addChild(leftEye)
+
+        let rightEye = SKShapeNode(circleOfRadius: 12)
+        rightEye.fillColor = .yellow
+        rightEye.strokeColor = .red
+        rightEye.lineWidth = 2
+        rightEye.position = CGPoint(x: 25, y: 15)
+        enemy.addChild(rightEye)
+
+        enemy.physicsBody = SKPhysicsBody(circleOfRadius: 60)
+        enemy.physicsBody?.isDynamic = false
+        enemy.physicsBody?.categoryBitMask = bossCategory
+        enemy.physicsBody?.contactTestBitMask = playerCategory
 
         return enemy
     }
@@ -817,6 +1325,236 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         node.addChild(rightPupil)
     }
 
+    // MARK: - Boss
+    func setupBoss(at position: CGPoint) {
+        boss = createBossEnemy()
+        boss?.position = position
+        boss?.name = "boss"
+        addChild(boss!)
+
+        // Boss health bar
+        bossHealthBar = SKShapeNode(rectOf: CGSize(width: 100, height: 10), cornerRadius: 5)
+        bossHealthBar?.fillColor = .red
+        bossHealthBar?.strokeColor = .white
+        bossHealthBar?.lineWidth = 2
+        bossHealthBar?.position = CGPoint(x: position.x, y: position.y + 100)
+        bossHealthBar?.zPosition = 100
+        addChild(bossHealthBar!)
+
+        // Boss movement
+        let moveLeft = SKAction.moveBy(x: -100, y: 0, duration: 2)
+        let moveRight = SKAction.moveBy(x: 100, y: 0, duration: 2)
+        let jump = SKAction.moveBy(x: 0, y: 50, duration: 0.5)
+        let fall = SKAction.moveBy(x: 0, y: -50, duration: 0.5)
+        let pattern = SKAction.sequence([moveLeft, SKAction.sequence([jump, fall]), moveRight, SKAction.sequence([jump, fall])])
+        boss?.run(SKAction.repeatForever(pattern))
+    }
+
+    func hitBoss() {
+        bossHealth -= 1
+
+        // Update health bar
+        let healthPercent = CGFloat(bossHealth) / 5.0
+        bossHealthBar?.xScale = healthPercent
+
+        // Flash effect
+        let flash = SKAction.sequence([
+            SKAction.colorize(with: .white, colorBlendFactor: 1.0, duration: 0.1),
+            SKAction.colorize(withColorBlendFactor: 0, duration: 0.1)
+        ])
+        boss?.run(SKAction.repeat(flash, count: 3))
+
+        if bossHealth <= 0 {
+            defeatBoss()
+        }
+    }
+
+    func defeatBoss() {
+        PlayerData.shared.checkAchievement("boss_defeat", progress: 1)
+
+        // Explosion effect
+        for _ in 0..<20 {
+            let particle = SKShapeNode(circleOfRadius: 10)
+            particle.fillColor = [.red, .orange, .yellow].randomElement()!
+            particle.strokeColor = .clear
+            particle.position = boss?.position ?? .zero
+            particle.zPosition = 100
+            addChild(particle)
+
+            let angle = CGFloat.random(in: 0...(.pi * 2))
+            let distance = CGFloat.random(in: 50...150)
+            let move = SKAction.moveBy(x: cos(angle) * distance, y: sin(angle) * distance, duration: 0.5)
+            let fade = SKAction.fadeOut(withDuration: 0.5)
+            particle.run(SKAction.sequence([SKAction.group([move, fade]), SKAction.removeFromParent()]))
+        }
+
+        boss?.removeFromParent()
+        bossHealthBar?.removeFromParent()
+        boss = nil
+    }
+
+    // MARK: - Hazards
+    func setupHazards() {
+        for (index, hazardData) in currentLevel.hazards.enumerated() {
+            let hazard = createHazard(type: hazardData.type, width: hazardData.width)
+            hazard.position = hazardData.position
+            hazard.name = "hazard_\(index)"
+            addChild(hazard)
+        }
+    }
+
+    func createHazard(type: HazardType, width: CGFloat) -> SKNode {
+        let hazard = SKNode()
+
+        switch type {
+        case .spikes:
+            let spikeCount = Int(width / 20)
+            for i in 0..<spikeCount {
+                let spike = SKShapeNode()
+                let path = CGMutablePath()
+                path.move(to: CGPoint(x: -10, y: 0))
+                path.addLine(to: CGPoint(x: 0, y: 25))
+                path.addLine(to: CGPoint(x: 10, y: 0))
+                path.closeSubpath()
+                spike.path = path
+                spike.fillColor = .gray
+                spike.strokeColor = .darkGray
+                spike.lineWidth = 2
+                spike.position = CGPoint(x: CGFloat(i) * 20 - width / 2 + 10, y: 0)
+                hazard.addChild(spike)
+            }
+
+        case .lava:
+            let lava = SKShapeNode(rectOf: CGSize(width: width, height: 30))
+            lava.fillColor = SKColor(red: 1.0, green: 0.3, blue: 0.0, alpha: 1.0)
+            lava.strokeColor = SKColor(red: 1.0, green: 0.6, blue: 0.0, alpha: 1.0)
+            lava.lineWidth = 3
+            hazard.addChild(lava)
+
+            // Bubble animation
+            let bubble = SKShapeNode(circleOfRadius: 5)
+            bubble.fillColor = .orange
+            bubble.strokeColor = .clear
+            bubble.position = CGPoint(x: 0, y: 10)
+            hazard.addChild(bubble)
+
+            let rise = SKAction.moveBy(x: 0, y: 15, duration: 0.5)
+            let pop = SKAction.scale(to: 0, duration: 0.1)
+            let reset = SKAction.group([SKAction.scale(to: 1, duration: 0), SKAction.moveTo(y: 10, duration: 0)])
+            bubble.run(SKAction.repeatForever(SKAction.sequence([rise, pop, reset])))
+
+        case .water:
+            let water = SKShapeNode(rectOf: CGSize(width: width, height: 40))
+            water.fillColor = SKColor(red: 0.2, green: 0.5, blue: 0.9, alpha: 0.7)
+            water.strokeColor = SKColor(red: 0.3, green: 0.6, blue: 1.0, alpha: 1.0)
+            water.lineWidth = 2
+            hazard.addChild(water)
+
+        case .saw:
+            let saw = SKShapeNode(circleOfRadius: width / 2)
+            saw.fillColor = .gray
+            saw.strokeColor = .darkGray
+            saw.lineWidth = 3
+            hazard.addChild(saw)
+
+            // Teeth
+            let teethCount = 12
+            for i in 0..<teethCount {
+                let angle = CGFloat(i) * (.pi * 2 / CGFloat(teethCount))
+                let tooth = SKShapeNode(rectOf: CGSize(width: 8, height: 15))
+                tooth.fillColor = .gray
+                tooth.strokeColor = .darkGray
+                tooth.position = CGPoint(x: cos(angle) * (width / 2 + 5), y: sin(angle) * (width / 2 + 5))
+                tooth.zRotation = angle
+                hazard.addChild(tooth)
+            }
+
+            let rotate = SKAction.rotate(byAngle: .pi * 2, duration: 1)
+            hazard.run(SKAction.repeatForever(rotate))
+        }
+
+        hazard.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: width, height: 30))
+        hazard.physicsBody?.isDynamic = false
+        hazard.physicsBody?.categoryBitMask = hazardCategory
+        hazard.physicsBody?.contactTestBitMask = playerCategory
+
+        return hazard
+    }
+
+    // MARK: - Trampolines
+    func setupTrampolines() {
+        for (index, pos) in currentLevel.trampolines.enumerated() {
+            let trampoline = createTrampoline()
+            trampoline.position = pos
+            trampoline.name = "trampoline_\(index)"
+            addChild(trampoline)
+        }
+    }
+
+    func createTrampoline() -> SKNode {
+        let trampoline = SKNode()
+
+        // Base
+        let base = SKShapeNode(rectOf: CGSize(width: 60, height: 15), cornerRadius: 3)
+        base.fillColor = SKColor(red: 0.3, green: 0.3, blue: 0.4, alpha: 1.0)
+        base.strokeColor = .gray
+        base.lineWidth = 2
+        trampoline.addChild(base)
+
+        // Bounce pad
+        let pad = SKShapeNode(rectOf: CGSize(width: 50, height: 8), cornerRadius: 4)
+        pad.fillColor = .red
+        pad.strokeColor = .darkGray
+        pad.lineWidth = 2
+        pad.position = CGPoint(x: 0, y: 12)
+        pad.name = "bouncePad"
+        trampoline.addChild(pad)
+
+        trampoline.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 60, height: 25))
+        trampoline.physicsBody?.isDynamic = false
+        trampoline.physicsBody?.categoryBitMask = trampolineCategory
+        trampoline.physicsBody?.contactTestBitMask = playerCategory
+
+        return trampoline
+    }
+
+    // MARK: - Checkpoints
+    func setupCheckpoints() {
+        for (index, pos) in currentLevel.checkpoints.enumerated() {
+            let checkpoint = createCheckpoint()
+            checkpoint.position = pos
+            checkpoint.name = "checkpoint_\(index)"
+            addChild(checkpoint)
+        }
+    }
+
+    func createCheckpoint() -> SKNode {
+        let checkpoint = SKNode()
+
+        // Flag pole
+        let pole = SKShapeNode(rectOf: CGSize(width: 6, height: 80))
+        pole.fillColor = SKColor(red: 0.4, green: 0.3, blue: 0.2, alpha: 1.0)
+        pole.strokeColor = .clear
+        pole.position = CGPoint(x: 0, y: 40)
+        checkpoint.addChild(pole)
+
+        // Flag
+        let flag = SKShapeNode(rectOf: CGSize(width: 30, height: 20))
+        flag.fillColor = .white
+        flag.strokeColor = .gray
+        flag.lineWidth = 2
+        flag.position = CGPoint(x: 18, y: 70)
+        flag.name = "checkpointFlag"
+        checkpoint.addChild(flag)
+
+        checkpoint.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 40, height: 80), center: CGPoint(x: 0, y: 40))
+        checkpoint.physicsBody?.isDynamic = false
+        checkpoint.physicsBody?.categoryBitMask = checkpointCategory
+        checkpoint.physicsBody?.contactTestBitMask = playerCategory
+
+        return checkpoint
+    }
+
     // MARK: - Power-ups
     func setupPowerUps() {
         for (index, powerUpData) in currentLevel.powerUps.enumerated() {
@@ -831,29 +1569,23 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     func createPowerUp(type: PowerUpType) -> SKNode {
         let powerUp = SKNode()
 
-        // Outer glow
         let glow = SKShapeNode(circleOfRadius: 25)
         glow.fillColor = type.color.withAlphaComponent(0.3)
         glow.strokeColor = .clear
         powerUp.addChild(glow)
 
-        // Pulsing glow
         let pulseOut = SKAction.scale(to: 1.3, duration: 0.5)
         let pulseIn = SKAction.scale(to: 1.0, duration: 0.5)
         glow.run(SKAction.repeatForever(SKAction.sequence([pulseOut, pulseIn])))
 
-        // Main body
         let body = SKShapeNode(circleOfRadius: 18)
         body.fillColor = type.color
         body.strokeColor = .white
         body.lineWidth = 3
         powerUp.addChild(body)
 
-        // Icon
         let icon = SKLabelNode(text: type.icon)
-        icon.fontName = "AvenirNext-Bold"
-        icon.fontSize = 20
-        icon.fontColor = .white
+        icon.fontSize = 18
         icon.verticalAlignmentMode = .center
         powerUp.addChild(icon)
 
@@ -862,7 +1594,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         powerUp.physicsBody?.categoryBitMask = powerUpCategory
         powerUp.physicsBody?.contactTestBitMask = playerCategory
 
-        // Float animation
         let moveUp = SKAction.moveBy(x: 0, y: 10, duration: 0.6)
         let moveDown = SKAction.moveBy(x: 0, y: -10, duration: 0.6)
         moveUp.timingMode = .easeInEaseOut
@@ -883,14 +1614,12 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     func createGoalFlag() -> SKNode {
         let goal = SKNode()
 
-        // Pole
         let pole = SKShapeNode(rectOf: CGSize(width: 8, height: 150))
         pole.fillColor = SKColor(red: 0.5, green: 0.35, blue: 0.2, alpha: 1.0)
         pole.strokeColor = .clear
         pole.position = CGPoint(x: 0, y: 75)
         goal.addChild(pole)
 
-        // Flag
         let flagPath = CGMutablePath()
         flagPath.move(to: CGPoint(x: 0, y: 0))
         flagPath.addLine(to: CGPoint(x: 60, y: -20))
@@ -902,10 +1631,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         flag.strokeColor = SKColor(red: 0.8, green: 0.0, blue: 0.0, alpha: 1.0)
         flag.lineWidth = 2
         flag.position = CGPoint(x: 4, y: 145)
-        flag.name = "flag"
         goal.addChild(flag)
 
-        // Star on flag
         let star = SKLabelNode(text: "★")
         star.fontName = "AvenirNext-Bold"
         star.fontSize = 24
@@ -913,11 +1640,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         star.position = CGPoint(x: 25, y: -25)
         flag.addChild(star)
 
-        // Wave animation
         let waveRight = SKAction.rotate(toAngle: 0.1, duration: 0.5)
         let waveLeft = SKAction.rotate(toAngle: -0.05, duration: 0.5)
-        waveRight.timingMode = .easeInEaseOut
-        waveLeft.timingMode = .easeInEaseOut
         flag.run(SKAction.repeatForever(SKAction.sequence([waveRight, waveLeft])))
 
         goal.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 60, height: 150), center: CGPoint(x: 30, y: 75))
@@ -938,9 +1662,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         leftButton.zPosition = 100
         cameraNode.addChild(leftButton)
 
-        let leftArrow = SKLabelNode(text: "<")
-        leftArrow.fontName = "AvenirNext-Bold"
-        leftArrow.fontSize = 36
+        let leftArrow = SKLabelNode(text: "◀")
+        leftArrow.fontSize = 30
         leftArrow.fontColor = .white
         leftArrow.verticalAlignmentMode = .center
         leftButton.addChild(leftArrow)
@@ -953,9 +1676,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         rightButton.zPosition = 100
         cameraNode.addChild(rightButton)
 
-        let rightArrow = SKLabelNode(text: ">")
-        rightArrow.fontName = "AvenirNext-Bold"
-        rightArrow.fontSize = 36
+        let rightArrow = SKLabelNode(text: "▶")
+        rightArrow.fontSize = 30
         rightArrow.fontColor = .white
         rightArrow.verticalAlignmentMode = .center
         rightButton.addChild(rightArrow)
@@ -970,7 +1692,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
         let jumpLabel = SKLabelNode(text: "JUMP")
         jumpLabel.fontName = "AvenirNext-Bold"
-        jumpLabel.fontSize = 18
+        jumpLabel.fontSize = 16
         jumpLabel.fontColor = .white
         jumpLabel.verticalAlignmentMode = .center
         jumpButton.addChild(jumpLabel)
@@ -979,57 +1701,83 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     func setupPauseButton() {
-        pauseButton = SKShapeNode(rectOf: CGSize(width: 50, height: 50), cornerRadius: 10)
+        pauseButton = SKShapeNode(rectOf: CGSize(width: 45, height: 45), cornerRadius: 8)
         pauseButton.fillColor = SKColor.black.withAlphaComponent(0.3)
         pauseButton.strokeColor = .white
         pauseButton.lineWidth = 2
         pauseButton.name = "pauseButton"
         pauseButton.zPosition = 100
-        pauseButton.position = CGPoint(x: size.width / 2 - 40, y: size.height / 2 - 40)
+        pauseButton.position = CGPoint(x: size.width / 2 - 35, y: size.height / 2 - 35)
         cameraNode.addChild(pauseButton)
 
-        let pauseIcon = SKLabelNode(text: "||")
+        let pauseIcon = SKLabelNode(text: "| |")
         pauseIcon.fontName = "AvenirNext-Bold"
-        pauseIcon.fontSize = 24
+        pauseIcon.fontSize = 20
         pauseIcon.fontColor = .white
         pauseIcon.verticalAlignmentMode = .center
         pauseButton.addChild(pauseIcon)
     }
 
     func updateControlPositions() {
-        let bottomY = -size.height / 2 + 80
-        leftButton?.position = CGPoint(x: -size.width / 2 + 70, y: bottomY)
-        rightButton?.position = CGPoint(x: -size.width / 2 + 170, y: bottomY)
-        jumpButton?.position = CGPoint(x: size.width / 2 - 80, y: bottomY)
+        let bottomY = -size.height / 2 + 70
+        leftButton?.position = CGPoint(x: -size.width / 2 + 60, y: bottomY)
+        rightButton?.position = CGPoint(x: -size.width / 2 + 160, y: bottomY)
+        jumpButton?.position = CGPoint(x: size.width / 2 - 70, y: bottomY)
     }
 
     // MARK: - HUD
     func setupHUD() {
         scoreLabel = SKLabelNode(text: "Coins: 0")
         scoreLabel.fontName = "AvenirNext-Bold"
-        scoreLabel.fontSize = 24
+        scoreLabel.fontSize = 20
         scoreLabel.fontColor = .yellow
         scoreLabel.horizontalAlignmentMode = .left
-        scoreLabel.position = CGPoint(x: -size.width / 2 + 20, y: size.height / 2 - 40)
+        scoreLabel.position = CGPoint(x: -size.width / 2 + 15, y: size.height / 2 - 30)
         scoreLabel.zPosition = 100
         cameraNode.addChild(scoreLabel)
 
-        livesLabel = SKLabelNode(text: "Lives: \(lives)")
+        gemsLabel = SKLabelNode(text: "Gems: 0")
+        gemsLabel.fontName = "AvenirNext-Bold"
+        gemsLabel.fontSize = 20
+        gemsLabel.fontColor = .cyan
+        gemsLabel.horizontalAlignmentMode = .left
+        gemsLabel.position = CGPoint(x: -size.width / 2 + 15, y: size.height / 2 - 55)
+        gemsLabel.zPosition = 100
+        cameraNode.addChild(gemsLabel)
+
+        livesLabel = SKLabelNode(text: "❤️ x\(lives)")
         livesLabel.fontName = "AvenirNext-Bold"
-        livesLabel.fontSize = 24
+        livesLabel.fontSize = 20
         livesLabel.fontColor = .red
         livesLabel.horizontalAlignmentMode = .left
-        livesLabel.position = CGPoint(x: -size.width / 2 + 20, y: size.height / 2 - 70)
+        livesLabel.position = CGPoint(x: -size.width / 2 + 15, y: size.height / 2 - 80)
         livesLabel.zPosition = 100
         cameraNode.addChild(livesLabel)
 
-        levelLabel = SKLabelNode(text: "Level \(currentLevel.levelNumber)")
+        levelLabel = SKLabelNode(text: currentLevel.name)
         levelLabel.fontName = "AvenirNext-Bold"
-        levelLabel.fontSize = 24
+        levelLabel.fontSize = 20
         levelLabel.fontColor = .white
-        levelLabel.position = CGPoint(x: 0, y: size.height / 2 - 40)
+        levelLabel.position = CGPoint(x: 0, y: size.height / 2 - 30)
         levelLabel.zPosition = 100
         cameraNode.addChild(levelLabel)
+
+        timerLabel = SKLabelNode(text: "0.0s")
+        timerLabel.fontName = "AvenirNext-Medium"
+        timerLabel.fontSize = 18
+        timerLabel.fontColor = .white
+        timerLabel.position = CGPoint(x: 0, y: size.height / 2 - 55)
+        timerLabel.zPosition = 100
+        cameraNode.addChild(timerLabel)
+
+        comboLabel = SKLabelNode(text: "")
+        comboLabel.fontName = "AvenirNext-Bold"
+        comboLabel.fontSize = 24
+        comboLabel.fontColor = .orange
+        comboLabel.position = CGPoint(x: 0, y: 0)
+        comboLabel.zPosition = 100
+        comboLabel.alpha = 0
+        cameraNode.addChild(comboLabel)
     }
 
     // MARK: - Touch Handling
@@ -1056,19 +1804,40 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         for node in nodes {
             let nodeName = node.name ?? node.parent?.name ?? ""
 
-            // Menu buttons
             if gameState == .menu {
-                if began && nodeName == "playButton" {
-                    startGame(level: PlayerData.shared.currentLevel)
-                    return
-                }
-                if began && nodeName == "levelButton" {
-                    showLevelSelect()
-                    return
+                if began {
+                    if nodeName == "playButton" {
+                        startGame(level: PlayerData.shared.currentLevel)
+                        return
+                    }
+                    if nodeName == "levelButton" {
+                        showLevelSelect()
+                        return
+                    }
+                    if nodeName == "shopButton" {
+                        showShop()
+                        return
+                    }
                 }
             }
 
-            // Level select buttons
+            if gameState == .shop {
+                if began {
+                    if nodeName == "backToMenuButton" {
+                        shopLayer?.removeFromParent()
+                        showMainMenu()
+                        return
+                    }
+                    if nodeName.hasPrefix("skin_") {
+                        let skinName = nodeName.replacingOccurrences(of: "skin_", with: "")
+                        if let skin = FoxSkin(rawValue: skinName) {
+                            handleSkinSelection(skin)
+                        }
+                        return
+                    }
+                }
+            }
+
             if nodeName.hasPrefix("level_") && began {
                 if let levelNum = Int(nodeName.replacingOccurrences(of: "level_", with: "")) {
                     if levelNum <= PlayerData.shared.currentLevel {
@@ -1084,7 +1853,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
                 return
             }
 
-            // Game over / level complete buttons
             if began && (nodeName == "retryButton" || nodeName == "nextButton" || nodeName == "menuButton") {
                 if nodeName == "retryButton" {
                     startGame(level: currentLevel.levelNumber)
@@ -1097,33 +1865,45 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
                 return
             }
 
-            // Pause button
             if began && nodeName == "pauseButton" {
                 togglePause()
                 return
             }
 
-            // Game controls
             if gameState == .playing {
                 if nodeName == "leftButton" {
                     if began {
                         moveDirection = -1
                         flipDash(facingRight: false)
-                    } else {
-                        if moveDirection < 0 { moveDirection = 0 }
+                    } else if moveDirection < 0 {
+                        moveDirection = 0
                     }
                 } else if nodeName == "rightButton" {
                     if began {
                         moveDirection = 1
                         flipDash(facingRight: true)
-                    } else {
-                        if moveDirection > 0 { moveDirection = 0 }
+                    } else if moveDirection > 0 {
+                        moveDirection = 0
                     }
                 } else if nodeName == "jumpButton" && began {
                     jump()
                 }
             }
         }
+    }
+
+    func handleSkinSelection(_ skin: FoxSkin) {
+        if PlayerData.shared.unlockedSkins.contains(skin) {
+            PlayerData.shared.currentSkin = skin
+            PlayerData.shared.save()
+        } else {
+            if PlayerData.shared.unlockSkin(skin) {
+                // Success
+            }
+        }
+        // Refresh shop
+        shopLayer?.removeFromParent()
+        showShop()
     }
 
     func togglePause() {
@@ -1143,17 +1923,17 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         pauseMenu.name = "pauseMenu"
         pauseMenu.zPosition = 150
 
-        let bg = SKShapeNode(rectOf: CGSize(width: 300, height: 250), cornerRadius: 20)
-        bg.fillColor = SKColor.black.withAlphaComponent(0.8)
+        let bg = SKShapeNode(rectOf: CGSize(width: 280, height: 220), cornerRadius: 15)
+        bg.fillColor = SKColor.black.withAlphaComponent(0.85)
         bg.strokeColor = .white
         bg.lineWidth = 3
         pauseMenu.addChild(bg)
 
         let pauseLabel = SKLabelNode(text: "PAUSED")
         pauseLabel.fontName = "AvenirNext-Bold"
-        pauseLabel.fontSize = 36
+        pauseLabel.fontSize = 32
         pauseLabel.fontColor = .white
-        pauseLabel.position = CGPoint(x: 0, y: 60)
+        pauseLabel.position = CGPoint(x: 0, y: 55)
         pauseMenu.addChild(pauseLabel)
 
         let resumeButton = createMenuButton(text: "Resume", color: .green)
@@ -1162,7 +1942,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         pauseMenu.addChild(resumeButton)
 
         let menuButton = createMenuButton(text: "Menu", color: .gray)
-        menuButton.position = CGPoint(x: 0, y: -70)
+        menuButton.position = CGPoint(x: 0, y: -65)
         menuButton.name = "menuButton"
         pauseMenu.addChild(menuButton)
 
@@ -1181,14 +1961,15 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         if onGround {
             body.applyImpulse(CGVector(dx: 0, dy: 450))
             hasDoubleJumped = false
+            PlayerData.shared.totalJumps += 1
             playJumpEffect()
         } else if canDoubleJump && !hasDoubleJumped {
             body.velocity.dy = 0
             body.applyImpulse(CGVector(dx: 0, dy: 400))
             hasDoubleJumped = true
+            PlayerData.shared.totalJumps += 1
             playJumpEffect()
 
-            // Double jump visual effect
             let burstEffect = SKShapeNode(circleOfRadius: 20)
             burstEffect.fillColor = .clear
             burstEffect.strokeColor = .magenta
@@ -1221,12 +2002,25 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             collectCoin(coinNode)
         }
 
+        if collision == playerCategory | gemCategory {
+            let gemNode = contact.bodyA.categoryBitMask == gemCategory ? contact.bodyA.node : contact.bodyB.node
+            collectGem(gemNode)
+        }
+
         if collision == playerCategory | enemyCategory {
-            if !hasShield {
+            if !hasShield && !hasInvincibility {
+                hitEnemy()
+            } else if hasShield {
+                removeShield()
+            }
+        }
+
+        if collision == playerCategory | bossCategory {
+            if !hasShield && !hasInvincibility {
                 hitEnemy()
             } else {
-                // Shield absorbs hit
-                removeShield()
+                hitBoss()
+                if hasShield { removeShield() }
             }
         }
 
@@ -1235,54 +2029,194 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             collectPowerUp(powerUpNode)
         }
 
+        if collision == playerCategory | hazardCategory {
+            if !hasShield && !hasInvincibility {
+                hitEnemy()
+            } else if hasShield {
+                removeShield()
+            }
+        }
+
+        if collision == playerCategory | trampolineCategory {
+            bounce()
+        }
+
+        if collision == playerCategory | checkpointCategory {
+            let checkpointNode = contact.bodyA.categoryBitMask == checkpointCategory ? contact.bodyA.node : contact.bodyB.node
+            activateCheckpoint(checkpointNode)
+        }
+
         if collision == playerCategory | goalCategory {
             reachGoal()
         }
+
+        // Platform interactions
+        if collision == playerCategory | platformCategory {
+            let platformNode = contact.bodyA.categoryBitMask == platformCategory ? contact.bodyA.node : contact.bodyB.node
+            handlePlatformContact(platformNode)
+        }
+    }
+
+    func handlePlatformContact(_ platform: SKNode?) {
+        guard let platform = platform, let userData = platform.userData,
+              let type = userData["type"] as? PlatformType else { return }
+
+        switch type {
+        case .bouncy:
+            dash?.physicsBody?.velocity.dy = 0
+            dash?.physicsBody?.applyImpulse(CGVector(dx: 0, dy: 600))
+        case .falling:
+            let wait = SKAction.wait(forDuration: 0.5)
+            let shake = SKAction.sequence([
+                SKAction.moveBy(x: 2, y: 0, duration: 0.05),
+                SKAction.moveBy(x: -4, y: 0, duration: 0.05),
+                SKAction.moveBy(x: 2, y: 0, duration: 0.05)
+            ])
+            let fall = SKAction.moveBy(x: 0, y: -500, duration: 1.0)
+            let remove = SKAction.removeFromParent()
+            platform.run(SKAction.sequence([wait, SKAction.repeat(shake, count: 5), fall, remove]))
+        case .crumbling:
+            let wait = SKAction.wait(forDuration: 1.0)
+            let crumble = SKAction.run {
+                for _ in 0..<5 {
+                    let piece = SKShapeNode(rectOf: CGSize(width: 15, height: 15))
+                    piece.fillColor = platform.children.first?.children.first is SKSpriteNode ?
+                        (platform.children.first as? SKSpriteNode)?.color ?? .brown : .brown
+                    piece.strokeColor = .clear
+                    piece.position = CGPoint(
+                        x: platform.position.x + CGFloat.random(in: -30...30),
+                        y: platform.position.y
+                    )
+                    piece.zPosition = 5
+                    self.addChild(piece)
+
+                    let fall = SKAction.moveBy(x: CGFloat.random(in: -20...20), y: -200, duration: 0.5)
+                    let rotate = SKAction.rotate(byAngle: .pi * 2, duration: 0.5)
+                    let fade = SKAction.fadeOut(withDuration: 0.5)
+                    piece.run(SKAction.sequence([SKAction.group([fall, rotate, fade]), SKAction.removeFromParent()]))
+                }
+            }
+            let remove = SKAction.removeFromParent()
+            platform.run(SKAction.sequence([wait, crumble, remove]))
+        default:
+            break
+        }
+    }
+
+    func bounce() {
+        dash?.physicsBody?.velocity.dy = 0
+        dash?.physicsBody?.applyImpulse(CGVector(dx: 0, dy: 700))
+
+        let squish = SKAction.scaleY(to: 0.6, duration: 0.1)
+        let stretch = SKAction.scaleY(to: 1.2, duration: 0.15)
+        let normal = SKAction.scaleY(to: 1.0, duration: 0.1)
+        dash?.run(SKAction.sequence([squish, stretch, normal]))
+    }
+
+    func activateCheckpoint(_ checkpoint: SKNode?) {
+        guard let checkpoint = checkpoint else { return }
+
+        lastCheckpoint = checkpoint.position
+
+        // Change flag color
+        if let flag = checkpoint.childNode(withName: "checkpointFlag") as? SKShapeNode {
+            flag.fillColor = .green
+        }
+
+        // Effect
+        let ring = SKShapeNode(circleOfRadius: 30)
+        ring.fillColor = .clear
+        ring.strokeColor = .green
+        ring.lineWidth = 3
+        ring.position = checkpoint.position
+        ring.zPosition = 50
+        addChild(ring)
+
+        let expand = SKAction.scale(to: 3, duration: 0.5)
+        let fade = SKAction.fadeOut(withDuration: 0.5)
+        ring.run(SKAction.sequence([SKAction.group([expand, fade]), SKAction.removeFromParent()]))
     }
 
     func collectCoin(_ coin: SKNode?) {
         guard let coin = coin else { return }
 
-        score += 1
-        PlayerData.shared.totalCoins += 1
+        // Combo system
+        let currentTime = CACurrentMediaTime()
+        if currentTime - lastComboTime < 1.0 {
+            comboCount += 1
+            PlayerData.shared.checkAchievement("combo_10", progress: comboCount)
+        } else {
+            comboCount = 1
+        }
+        lastComboTime = currentTime
+
+        let coinValue = comboCount > 1 ? comboCount : 1
+        score += coinValue
+        PlayerData.shared.addCoins(coinValue)
         scoreLabel?.text = "Coins: \(score)"
 
-        let scaleUp = SKAction.scale(to: 1.5, duration: 0.1)
-        let fadeOut = SKAction.fadeOut(withDuration: 0.2)
-        let remove = SKAction.removeFromParent()
-        coin.run(SKAction.sequence([scaleUp, fadeOut, remove]))
+        // Show combo
+        if comboCount > 1 {
+            comboLabel?.text = "\(comboCount)x COMBO!"
+            comboLabel?.alpha = 1
+            comboLabel?.setScale(0.5)
+            let grow = SKAction.scale(to: 1.2, duration: 0.2)
+            let shrink = SKAction.scale(to: 1.0, duration: 0.1)
+            let wait = SKAction.wait(forDuration: 0.5)
+            let fadeOut = SKAction.fadeOut(withDuration: 0.3)
+            comboLabel?.run(SKAction.sequence([grow, shrink, wait, fadeOut]))
+        }
 
-        let scorePopup = SKLabelNode(text: "+1")
-        scorePopup.fontName = "AvenirNext-Bold"
-        scorePopup.fontSize = 24
-        scorePopup.fontColor = .yellow
-        scorePopup.position = coin.position
-        scorePopup.zPosition = 50
-        addChild(scorePopup)
+        coin.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 1.5, duration: 0.1), SKAction.fadeOut(withDuration: 0.2)]),
+            SKAction.removeFromParent()
+        ]))
 
-        let moveUp = SKAction.moveBy(x: 0, y: 50, duration: 0.5)
+        showScorePopup(at: coin.position, text: "+\(coinValue)", color: .yellow)
+    }
+
+    func collectGem(_ gem: SKNode?) {
+        guard let gem = gem else { return }
+
+        gemsCollected += 1
+        PlayerData.shared.addGems(1)
+        gemsLabel?.text = "Gems: \(gemsCollected)"
+
+        gem.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 1.5, duration: 0.1), SKAction.fadeOut(withDuration: 0.2)]),
+            SKAction.removeFromParent()
+        ]))
+
+        showScorePopup(at: gem.position, text: "+1 GEM", color: .cyan)
+    }
+
+    func showScorePopup(at position: CGPoint, text: String, color: SKColor) {
+        let popup = SKLabelNode(text: text)
+        popup.fontName = "AvenirNext-Bold"
+        popup.fontSize = 20
+        popup.fontColor = color
+        popup.position = position
+        popup.zPosition = 50
+        addChild(popup)
+
+        let moveUp = SKAction.moveBy(x: 0, y: 40, duration: 0.5)
         let fade = SKAction.fadeOut(withDuration: 0.5)
-        let group = SKAction.group([moveUp, fade])
-        scorePopup.run(SKAction.sequence([group, SKAction.removeFromParent()]))
+        popup.run(SKAction.sequence([SKAction.group([moveUp, fade]), SKAction.removeFromParent()]))
     }
 
     func collectPowerUp(_ powerUp: SKNode?) {
         guard let powerUp = powerUp, let userData = powerUp.userData,
               let type = userData["type"] as? PowerUpType else { return }
 
-        // Apply power-up effect
         switch type {
-        case .speedBoost:
-            activateSpeedBoost()
-        case .doubleJump:
-            activateDoubleJump()
-        case .shield:
-            activateShield()
-        case .magnet:
-            activateMagnet()
+        case .speedBoost: activateSpeedBoost()
+        case .doubleJump: activateDoubleJump()
+        case .shield: activateShield()
+        case .magnet: activateMagnet()
+        case .invincibility: activateInvincibility()
+        case .timeFreeze: activateTimeFreeze()
         }
 
-        // Collection effect
         let burst = SKShapeNode(circleOfRadius: 30)
         burst.fillColor = type.color.withAlphaComponent(0.5)
         burst.strokeColor = type.color
@@ -1291,45 +2225,16 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         burst.zPosition = 50
         addChild(burst)
 
-        let expand = SKAction.scale(to: 3, duration: 0.3)
-        let fade = SKAction.fadeOut(withDuration: 0.3)
-        burst.run(SKAction.sequence([SKAction.group([expand, fade]), SKAction.removeFromParent()]))
+        burst.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 3, duration: 0.3), SKAction.fadeOut(withDuration: 0.3)]),
+            SKAction.removeFromParent()
+        ]))
 
         powerUp.removeFromParent()
-
-        // Show power-up name
-        let powerUpLabel = SKLabelNode(text: "\(type)".uppercased())
-        powerUpLabel.fontName = "AvenirNext-Bold"
-        powerUpLabel.fontSize = 20
-        powerUpLabel.fontColor = type.color
-        powerUpLabel.position = CGPoint(x: powerUp.position.x, y: powerUp.position.y + 40)
-        powerUpLabel.zPosition = 50
-        addChild(powerUpLabel)
-
-        let rise = SKAction.moveBy(x: 0, y: 30, duration: 0.8)
-        let fadeLabel = SKAction.fadeOut(withDuration: 0.8)
-        powerUpLabel.run(SKAction.sequence([SKAction.group([rise, fadeLabel]), SKAction.removeFromParent()]))
     }
 
     func activateSpeedBoost() {
         hasSpeedBoost = true
-
-        // Visual trail effect
-        let trailAction = SKAction.run { [weak self] in
-            guard let self = self, self.hasSpeedBoost, let dash = self.dash else { return }
-            let ghost = SKShapeNode(circleOfRadius: 20)
-            ghost.fillColor = .cyan.withAlphaComponent(0.3)
-            ghost.strokeColor = .clear
-            ghost.position = dash.position
-            ghost.zPosition = -1
-            self.addChild(ghost)
-            ghost.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.3), SKAction.removeFromParent()]))
-        }
-        let wait = SKAction.wait(forDuration: 0.05)
-        let trailSequence = SKAction.sequence([trailAction, wait])
-        run(SKAction.repeat(trailSequence, count: Int(PowerUpType.speedBoost.duration / 0.05)), withKey: "speedTrail")
-
-        // Deactivate after duration
         run(SKAction.sequence([
             SKAction.wait(forDuration: PowerUpType.speedBoost.duration),
             SKAction.run { [weak self] in self?.hasSpeedBoost = false }
@@ -1339,7 +2244,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     func activateDoubleJump() {
         canDoubleJump = true
         hasDoubleJumped = false
-
         run(SKAction.sequence([
             SKAction.wait(forDuration: PowerUpType.doubleJump.duration),
             SKAction.run { [weak self] in self?.canDoubleJump = false }
@@ -1348,8 +2252,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
     func activateShield() {
         hasShield = true
-
-        // Create shield visual
         shieldNode?.removeFromParent()
         shieldNode = SKShapeNode(circleOfRadius: 45)
         shieldNode?.fillColor = SKColor.blue.withAlphaComponent(0.2)
@@ -1357,11 +2259,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         shieldNode?.lineWidth = 3
         shieldNode?.zPosition = 10
         dash?.addChild(shieldNode!)
-
-        // Pulse animation
-        let pulseOut = SKAction.scale(to: 1.1, duration: 0.5)
-        let pulseIn = SKAction.scale(to: 0.9, duration: 0.5)
-        shieldNode?.run(SKAction.repeatForever(SKAction.sequence([pulseOut, pulseIn])))
 
         run(SKAction.sequence([
             SKAction.wait(forDuration: PowerUpType.shield.duration),
@@ -1371,25 +2268,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
     func removeShield() {
         hasShield = false
-
-        // Shield break effect
-        if let shieldPos = shieldNode?.parent?.position {
-            for i in 0..<8 {
-                let shard = SKShapeNode(rectOf: CGSize(width: 10, height: 20))
-                shard.fillColor = .cyan
-                shard.strokeColor = .clear
-                shard.position = shieldPos
-                shard.zPosition = 50
-                addChild(shard)
-
-                let angle = CGFloat(i) * .pi / 4
-                let moveOut = SKAction.moveBy(x: cos(angle) * 60, y: sin(angle) * 60, duration: 0.3)
-                let rotate = SKAction.rotate(byAngle: .pi, duration: 0.3)
-                let fade = SKAction.fadeOut(withDuration: 0.3)
-                shard.run(SKAction.sequence([SKAction.group([moveOut, rotate, fade]), SKAction.removeFromParent()]))
-            }
-        }
-
         shieldNode?.removeFromParent()
         shieldNode = nil
         removeAction(forKey: "shield")
@@ -1397,32 +2275,85 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
     func activateMagnet() {
         hasMagnet = true
-
         run(SKAction.sequence([
             SKAction.wait(forDuration: PowerUpType.magnet.duration),
             SKAction.run { [weak self] in self?.hasMagnet = false }
         ]), withKey: "magnet")
     }
 
+    func activateInvincibility() {
+        hasInvincibility = true
+
+        // Rainbow flash effect
+        let colors: [SKColor] = [.red, .orange, .yellow, .green, .blue, .purple]
+        var colorActions: [SKAction] = []
+        for color in colors {
+            colorActions.append(SKAction.run { [weak self] in
+                self?.dash?.children.compactMap { $0 as? SKShapeNode }.forEach { shape in
+                    if shape.name != "frontLeg" && shape.name != "backLeg" {
+                        shape.strokeColor = color
+                    }
+                }
+            })
+            colorActions.append(SKAction.wait(forDuration: 0.1))
+        }
+        dash?.run(SKAction.repeat(SKAction.sequence(colorActions), count: Int(PowerUpType.invincibility.duration / 0.6)), withKey: "invincibleFlash")
+
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: PowerUpType.invincibility.duration),
+            SKAction.run { [weak self] in
+                self?.hasInvincibility = false
+                self?.dash?.removeAction(forKey: "invincibleFlash")
+            }
+        ]), withKey: "invincibility")
+    }
+
+    func activateTimeFreeze() {
+        hasTimeFreeze = true
+
+        // Slow down enemies
+        enumerateChildNodes(withName: "enemy_*") { enemy, _ in
+            enemy.speed = 0.2
+        }
+
+        // Visual effect
+        let overlay = SKShapeNode(rectOf: CGSize(width: size.width * 2, height: size.height * 2))
+        overlay.fillColor = SKColor.cyan.withAlphaComponent(0.1)
+        overlay.strokeColor = .clear
+        overlay.zPosition = 40
+        overlay.name = "freezeOverlay"
+        cameraNode.addChild(overlay)
+
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: PowerUpType.timeFreeze.duration),
+            SKAction.run { [weak self] in
+                self?.hasTimeFreeze = false
+                self?.enumerateChildNodes(withName: "enemy_*") { enemy, _ in
+                    enemy.speed = 1.0
+                }
+                self?.cameraNode.childNode(withName: "freezeOverlay")?.removeFromParent()
+            }
+        ]), withKey: "timeFreeze")
+    }
+
     func hitEnemy() {
+        damageTaken = true
         lives -= 1
         PlayerData.shared.lives = lives
-        livesLabel?.text = "Lives: \(lives)"
-
-        // Flash red
-        let flashRed = SKAction.run { [weak self] in
-            self?.dash?.children.compactMap { $0 as? SKShapeNode }.forEach { $0.fillColor = .red }
-        }
-        let flashNormal = SKAction.run { [weak self] in
-            self?.dash?.removeFromParent()
-            self?.setupDash()
-        }
-        dash?.run(SKAction.sequence([flashRed, SKAction.wait(forDuration: 0.1), flashNormal]))
+        PlayerData.shared.totalDeaths += 1
+        livesLabel?.text = "❤️ x\(lives)"
 
         // Knockback
         let knockback = CGVector(dx: -moveDirection * 200, dy: 300)
-        dash?.physicsBody?.velocity = CGVector.zero
+        dash?.physicsBody?.velocity = .zero
         dash?.physicsBody?.applyImpulse(knockback)
+
+        // Flash effect
+        let flash = SKAction.sequence([
+            SKAction.fadeAlpha(to: 0.3, duration: 0.1),
+            SKAction.fadeAlpha(to: 1.0, duration: 0.1)
+        ])
+        dash?.run(SKAction.repeat(flash, count: 5))
 
         if lives <= 0 {
             gameOver()
@@ -1433,19 +2364,32 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         guard gameState == .playing else { return }
         gameState = .levelComplete
 
-        // Update player data
+        levelTime = CACurrentMediaTime() - levelStartTime
+
         PlayerData.shared.updateHighScore(level: currentLevel.levelNumber, score: score)
+        PlayerData.shared.updateBestTime(level: currentLevel.levelNumber, time: levelTime)
+
         if currentLevel.levelNumber >= PlayerData.shared.currentLevel {
             PlayerData.shared.currentLevel = min(currentLevel.levelNumber + 1, LevelData.totalLevels)
         }
+
+        PlayerData.shared.checkAchievement("levels_3", progress: PlayerData.shared.currentLevel)
+        PlayerData.shared.checkAchievement("levels_6", progress: PlayerData.shared.currentLevel)
+
+        if !damageTaken {
+            PlayerData.shared.checkAchievement("no_damage", progress: 1)
+        }
+
+        if levelTime < 60 {
+            PlayerData.shared.checkAchievement("speed_run", progress: 1)
+        }
+
         PlayerData.shared.save()
 
-        // Victory animation
         let jump1 = SKAction.moveBy(x: 0, y: 50, duration: 0.3)
         let jump2 = SKAction.moveBy(x: 0, y: -50, duration: 0.3)
         dash?.run(SKAction.sequence([jump1, jump2, jump1, jump2]))
 
-        // Show level complete screen
         run(SKAction.sequence([
             SKAction.wait(forDuration: 1.5),
             SKAction.run { [weak self] in self?.showLevelComplete() }
@@ -1457,42 +2401,49 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         levelCompleteLayer.zPosition = 200
         cameraNode.addChild(levelCompleteLayer)
 
-        let bg = SKShapeNode(rectOf: CGSize(width: 350, height: 300), cornerRadius: 20)
-        bg.fillColor = SKColor.black.withAlphaComponent(0.8)
+        let bg = SKShapeNode(rectOf: CGSize(width: 320, height: 350), cornerRadius: 15)
+        bg.fillColor = SKColor.black.withAlphaComponent(0.85)
         bg.strokeColor = .yellow
         bg.lineWidth = 4
         levelCompleteLayer.addChild(bg)
 
         let completeLabel = SKLabelNode(text: "LEVEL COMPLETE!")
         completeLabel.fontName = "AvenirNext-Bold"
-        completeLabel.fontSize = 32
+        completeLabel.fontSize = 28
         completeLabel.fontColor = .yellow
-        completeLabel.position = CGPoint(x: 0, y: 90)
+        completeLabel.position = CGPoint(x: 0, y: 120)
         levelCompleteLayer.addChild(completeLabel)
+
+        let timeLabel = SKLabelNode(text: String(format: "Time: %.1fs", levelTime))
+        timeLabel.fontName = "AvenirNext-Medium"
+        timeLabel.fontSize = 20
+        timeLabel.fontColor = .white
+        timeLabel.position = CGPoint(x: 0, y: 80)
+        levelCompleteLayer.addChild(timeLabel)
 
         let scoreText = SKLabelNode(text: "Coins: \(score)")
         scoreText.fontName = "AvenirNext-Medium"
-        scoreText.fontSize = 24
-        scoreText.fontColor = .white
-        scoreText.position = CGPoint(x: 0, y: 40)
+        scoreText.fontSize = 20
+        scoreText.fontColor = .yellow
+        scoreText.position = CGPoint(x: 0, y: 50)
         levelCompleteLayer.addChild(scoreText)
 
-        let highScoreText = SKLabelNode(text: "Best: \(PlayerData.shared.highScores[currentLevel.levelNumber] ?? score)")
-        highScoreText.fontName = "AvenirNext-Medium"
-        highScoreText.fontSize = 20
-        highScoreText.fontColor = .gray
-        highScoreText.position = CGPoint(x: 0, y: 10)
-        levelCompleteLayer.addChild(highScoreText)
+        let gemsText = SKLabelNode(text: "Gems: \(gemsCollected)")
+        gemsText.fontName = "AvenirNext-Medium"
+        gemsText.fontSize = 20
+        gemsText.fontColor = .cyan
+        gemsText.position = CGPoint(x: 0, y: 20)
+        levelCompleteLayer.addChild(gemsText)
 
         if currentLevel.levelNumber < LevelData.totalLevels {
             let nextButton = createMenuButton(text: "Next Level", color: .green)
-            nextButton.position = CGPoint(x: 0, y: -50)
+            nextButton.position = CGPoint(x: 0, y: -40)
             nextButton.name = "nextButton"
             levelCompleteLayer.addChild(nextButton)
         }
 
         let menuButton = createMenuButton(text: "Menu", color: .gray)
-        menuButton.position = CGPoint(x: 0, y: -120)
+        menuButton.position = CGPoint(x: 0, y: -110)
         menuButton.name = "menuButton"
         levelCompleteLayer.addChild(menuButton)
     }
@@ -1513,33 +2464,33 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         gameOverLayer.zPosition = 200
         cameraNode.addChild(gameOverLayer)
 
-        let bg = SKShapeNode(rectOf: CGSize(width: 350, height: 280), cornerRadius: 20)
-        bg.fillColor = SKColor.black.withAlphaComponent(0.8)
+        let bg = SKShapeNode(rectOf: CGSize(width: 320, height: 260), cornerRadius: 15)
+        bg.fillColor = SKColor.black.withAlphaComponent(0.85)
         bg.strokeColor = .red
         bg.lineWidth = 4
         gameOverLayer.addChild(bg)
 
         let gameOverLabel = SKLabelNode(text: "GAME OVER")
         gameOverLabel.fontName = "AvenirNext-Bold"
-        gameOverLabel.fontSize = 36
+        gameOverLabel.fontSize = 32
         gameOverLabel.fontColor = .red
         gameOverLabel.position = CGPoint(x: 0, y: 70)
         gameOverLayer.addChild(gameOverLabel)
 
         let scoreText = SKLabelNode(text: "Coins: \(score)")
         scoreText.fontName = "AvenirNext-Medium"
-        scoreText.fontSize = 24
+        scoreText.fontSize = 22
         scoreText.fontColor = .white
-        scoreText.position = CGPoint(x: 0, y: 20)
+        scoreText.position = CGPoint(x: 0, y: 25)
         gameOverLayer.addChild(scoreText)
 
         let retryButton = createMenuButton(text: "Retry", color: .orange)
-        retryButton.position = CGPoint(x: 0, y: -40)
+        retryButton.position = CGPoint(x: 0, y: -30)
         retryButton.name = "retryButton"
         gameOverLayer.addChild(retryButton)
 
         let menuButton = createMenuButton(text: "Menu", color: .gray)
-        menuButton.position = CGPoint(x: 0, y: -110)
+        menuButton.position = CGPoint(x: 0, y: -95)
         menuButton.name = "menuButton"
         gameOverLayer.addChild(menuButton)
     }
@@ -1547,6 +2498,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Update
     override func update(_ currentTime: TimeInterval) {
         guard gameState == .playing, let dash = dash, let body = dash.physicsBody else { return }
+
+        // Update timer
+        levelTime = currentTime - levelStartTime
+        timerLabel?.text = String(format: "%.1fs", levelTime)
 
         // Move Dash
         let baseSpeed: CGFloat = 300
@@ -1558,31 +2513,37 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let clampedX = max(size.width / 2, min(targetX, currentLevel.levelLength - size.width / 2))
         cameraNode.position = CGPoint(x: clampedX, y: size.height / 2)
 
-        // Animate legs when moving
+        // Animations
         if abs(moveDirection) > 0 {
             animateLegs()
         }
-
-        // Animate tail
         animateTail()
 
-        // Magnet effect - attract coins
+        // Magnet effect
         if hasMagnet {
-            attractCoins()
+            attractCollectibles()
         }
 
         // Check for fall
         if dash.position.y < -100 {
-            if lives > 1 {
+            if let checkpoint = lastCheckpoint {
+                dash.position = CGPoint(x: checkpoint.x, y: checkpoint.y + 100)
+                body.velocity = .zero
                 lives -= 1
                 PlayerData.shared.lives = lives
-                livesLabel?.text = "Lives: \(lives)"
-                dash.position = CGPoint(x: max(150, dash.position.x - 200), y: 300)
-                body.velocity = CGVector.zero
+                livesLabel?.text = "❤️ x\(lives)"
+                if lives <= 0 {
+                    gameOver()
+                }
             } else {
-                lives = 0
-                livesLabel?.text = "Lives: 0"
-                gameOver()
+                lives -= 1
+                PlayerData.shared.lives = lives
+                livesLabel?.text = "❤️ x\(lives)"
+                dash.position = CGPoint(x: 150, y: 300)
+                body.velocity = .zero
+                if lives <= 0 {
+                    gameOver()
+                }
             }
         }
     }
@@ -1592,11 +2553,11 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
               let backLeg = dash?.childNode(withName: "backLeg") else { return }
 
         if frontLeg.action(forKey: "walk") == nil {
-            let rotateForward = SKAction.rotate(toAngle: 0.3, duration: 0.1)
-            let rotateBack = SKAction.rotate(toAngle: -0.3, duration: 0.1)
-            let walkCycle = SKAction.sequence([rotateForward, rotateBack])
-            frontLeg.run(SKAction.repeatForever(walkCycle), withKey: "walk")
-            backLeg.run(SKAction.repeatForever(walkCycle.reversed()), withKey: "walk")
+            let forward = SKAction.rotate(toAngle: 0.3, duration: 0.1)
+            let back = SKAction.rotate(toAngle: -0.3, duration: 0.1)
+            let cycle = SKAction.sequence([forward, back])
+            frontLeg.run(SKAction.repeatForever(cycle), withKey: "walk")
+            backLeg.run(SKAction.repeatForever(cycle.reversed()), withKey: "walk")
         }
     }
 
@@ -1604,29 +2565,40 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         guard let tail = dash?.childNode(withName: "tail") else { return }
 
         if tail.action(forKey: "wag") == nil {
-            let wagLeft = SKAction.rotate(toAngle: 0.2, duration: 0.2)
-            let wagRight = SKAction.rotate(toAngle: -0.2, duration: 0.2)
-            wagLeft.timingMode = .easeInEaseOut
-            wagRight.timingMode = .easeInEaseOut
-            tail.run(SKAction.repeatForever(SKAction.sequence([wagLeft, wagRight])), withKey: "wag")
+            let left = SKAction.rotate(toAngle: 0.2, duration: 0.2)
+            let right = SKAction.rotate(toAngle: -0.2, duration: 0.2)
+            left.timingMode = .easeInEaseOut
+            right.timingMode = .easeInEaseOut
+            tail.run(SKAction.repeatForever(SKAction.sequence([left, right])), withKey: "wag")
         }
     }
 
-    func attractCoins() {
+    func attractCollectibles() {
         let magnetRange: CGFloat = 200
 
         enumerateChildNodes(withName: "coin_*") { [weak self] coin, _ in
             guard let self = self, let dash = self.dash else { return }
-
             let distance = hypot(coin.position.x - dash.position.x, coin.position.y - dash.position.y)
-
-            if distance < magnetRange {
+            if distance < magnetRange && distance > 0 {
                 let direction = CGVector(
-                    dx: (dash.position.x - coin.position.x) / distance * 5,
-                    dy: (dash.position.y - coin.position.y) / distance * 5
+                    dx: (dash.position.x - coin.position.x) / distance * 8,
+                    dy: (dash.position.y - coin.position.y) / distance * 8
                 )
                 coin.position.x += direction.dx
                 coin.position.y += direction.dy
+            }
+        }
+
+        enumerateChildNodes(withName: "gem_*") { [weak self] gem, _ in
+            guard let self = self, let dash = self.dash else { return }
+            let distance = hypot(gem.position.x - dash.position.x, gem.position.y - dash.position.y)
+            if distance < magnetRange && distance > 0 {
+                let direction = CGVector(
+                    dx: (dash.position.x - gem.position.x) / distance * 8,
+                    dy: (dash.position.y - gem.position.y) / distance * 8
+                )
+                gem.position.x += direction.dx
+                gem.position.y += direction.dy
             }
         }
     }

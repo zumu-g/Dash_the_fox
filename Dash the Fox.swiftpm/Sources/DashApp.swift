@@ -1,3 +1,13 @@
+//
+//  DashApp.swift
+//  Dash the Fox
+//
+//  A SwiftUI app that hosts the SpriteKit game scene.
+//  This is the main entry point for the iOS app.
+//
+//  Created with Claude Code assistance.
+//
+
 import SwiftUI
 import SpriteKit
 
@@ -5,15 +15,23 @@ import SpriteKit
 struct DashApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            GameView()
                 .ignoresSafeArea()
+                .statusBarHidden()
         }
     }
 }
 
-struct ContentView: View {
+struct GameView: View {
+    var scene: SKScene {
+        let scene = GameScene()
+        scene.size = UIScreen.main.bounds.size
+        scene.scaleMode = .resizeFill
+        return scene
+    }
+
     var body: some View {
-        SpriteView(scene: GameScene(size: UIScreen.main.bounds.size))
+        SpriteView(scene: scene)
             .ignoresSafeArea()
     }
 }
